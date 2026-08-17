@@ -17,3 +17,6 @@ dist/
 
 # Python http.server artefacts
 __pycache__/
+
+# Generated single-file preview bundle
+_build/amira-site.bundle.html
