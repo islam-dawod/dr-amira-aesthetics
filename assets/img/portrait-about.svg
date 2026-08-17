@@ -1,0 +1,27 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 900" width="720" height="900" role="img" aria-label="Dr. Amira Dabbagha in clinic">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#E5D3D2"/>
+      <stop offset="1" stop-color="#DCE4DE"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.40" cy="0.26" r="0.68">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="1" stop-color="#F7F5F2" stop-opacity=".5"/>
+    </linearGradient>
+  </defs>
+  <rect width="720" height="900" fill="url(#bg)"/>
+  <rect width="720" height="900" fill="url(#glow)"/>
+  <circle cx="360" cy="396" r="216" fill="none" stroke="#A99B94" stroke-opacity=".26" stroke-width="1"/>
+  <path d="M94 900 C144 648 259 630 360 630 C461 630 576 648 626 900 Z" fill="#FFFFFF" fill-opacity=".52"/>
+  <rect x="325" y="531" width="70" height="135" rx="35" fill="#FFFFFF" fill-opacity=".46"/>
+  <ellipse cx="360" cy="396" rx="150" ry="194" fill="#FFFFFF" fill-opacity=".60"/>
+  <path d="M210 396 C210 233 267 202 360 202 C453 202 510 233 510 396 C504 314 465 291 360 291 C255 291 216 314 210 396 Z" fill="#493A43" fill-opacity=".13"/>
+  <rect width="720" height="900" fill="url(#fade)"/>
+
+
+  <text x="360" y="870" text-anchor="middle" font-family="Georgia, serif" font-size="13" letter-spacing="3.2" fill="#493A43" fill-opacity=".32">PHOTOGRAPHY PLACEHOLDER</text>
+</svg>

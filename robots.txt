@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# Replace REPLACE-WITH-DOMAIN with the live host before going live.
+Sitemap: https://REPLACE-WITH-DOMAIN/sitemap.xml

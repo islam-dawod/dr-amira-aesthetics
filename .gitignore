@@ -1,0 +1,19 @@
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Local tooling / scratch
+*.log
+dist/
+.cache/
+
+# Python http.server artefacts
+__pycache__/

@@ -1,0 +1,27 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600" width="900" height="600" role="img" aria-label="article image">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#DCE4DE"/>
+      <stop offset="1" stop-color="#E5D3D2"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.40" cy="0.26" r="0.68">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="1" stop-color="#F7F5F2" stop-opacity=".5"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="600" fill="url(#bg)"/>
+  <rect width="900" height="600" fill="url(#glow)"/>
+  <circle cx="450" cy="264" r="180" fill="none" stroke="#A99B94" stroke-opacity=".26" stroke-width="1"/>
+  <path d="M117 600 C180 432 324 420 450 420 C576 420 720 432 783 600 Z" fill="#FFFFFF" fill-opacity=".52"/>
+  <rect x="407" y="354" width="87" height="90" rx="43" fill="#FFFFFF" fill-opacity=".46"/>
+  <ellipse cx="450" cy="264" rx="187" ry="130" fill="#FFFFFF" fill-opacity=".60"/>
+  <path d="M263 264 C263 155 334 134 450 134 C566 134 637 155 637 264 C630 210 581 194 450 194 C319 194 270 210 263 264 Z" fill="#493A43" fill-opacity=".13"/>
+  <rect width="900" height="600" fill="url(#fade)"/>
+
+
+  <text x="450" y="570" text-anchor="middle" font-family="Georgia, serif" font-size="13" letter-spacing="3.2" fill="#493A43" fill-opacity=".32">PHOTOGRAPHY PLACEHOLDER</text>
+</svg>

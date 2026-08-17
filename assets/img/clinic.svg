@@ -1,0 +1,27 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 700" width="900" height="700" role="img" aria-label="clinic interior">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#DCE4DE"/>
+      <stop offset="1" stop-color="#F7F5F2"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.40" cy="0.26" r="0.68">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="1" stop-color="#F7F5F2" stop-opacity=".5"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="700" fill="url(#bg)"/>
+  <rect width="900" height="700" fill="url(#glow)"/>
+  <circle cx="450" cy="308" r="210" fill="none" stroke="#A99B94" stroke-opacity=".26" stroke-width="1"/>
+  <path d="M117 700 C180 504 324 490 450 490 C576 490 720 504 783 700 Z" fill="#FFFFFF" fill-opacity=".52"/>
+  <rect x="407" y="413" width="87" height="105" rx="43" fill="#FFFFFF" fill-opacity=".46"/>
+  <ellipse cx="450" cy="308" rx="187" ry="151" fill="#FFFFFF" fill-opacity=".60"/>
+  <path d="M263 308 C263 181 334 157 450 157 C566 157 637 181 637 308 C630 244 581 226 450 226 C319 226 270 244 263 308 Z" fill="#493A43" fill-opacity=".13"/>
+  <rect width="900" height="700" fill="url(#fade)"/>
+
+
+  <text x="450" y="670" text-anchor="middle" font-family="Georgia, serif" font-size="13" letter-spacing="3.2" fill="#493A43" fill-opacity=".32">PHOTOGRAPHY PLACEHOLDER</text>
+</svg>

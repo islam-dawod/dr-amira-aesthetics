@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>הצהרת נגישות — ד״ר אמירה דבאגה</title>
+<meta name="description" content="האתר נבנה לפי תקן WCAG 2.2 ברמה AA: ניגודיות נבדקת, ניווט מלא במקלדת, כיבוד העדפת הפחתת אנימציות ותמיכה בקוראי מסך.">
+<meta name="theme-color" content="#F7F5F2">
+<link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@200;300;400;500&family=Cormorant+Garamond:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main">דלגי לתוכן הראשי</a>
+
+<header class="site-header">
+  <div class="shell nav">
+    <a class="brand" href="index.html">
+      <span class="brand__name">Dr. Amira Dabbagha</span>
+      <span class="brand__role">Medical Aesthetics</span>
+    </a>
+    <nav aria-label="ניווט ראשי">
+      <ul class="nav__links">
+        <li><a href="index.html">בית</a></li>
+        <li><a href="dr-amira.html">ד״ר אמירה</a></li>
+        <li class="nav__item">
+          <a href="treatments.html">טיפולים</a>
+          <ul class="nav__sub">
+            <li><a href="treatments/botox.html">Botox · ריכוך קמטי הבעה</a></li>
+            <li><a href="treatments/fillers.html">Dermal Fillers</a></li>
+            <li><a href="treatments/lips.html">שפתיים</a></li>
+            <li><a href="treatments/cheeks.html">לחיים</a></li>
+            <li><a href="treatments/chin.html">סנטר</a></li>
+            <li><a href="treatments/jawline.html">קו לסת</a></li>
+            <li><a href="treatments/facial-balancing.html">איזון פרופורציות</a></li>
+          </ul>
+        </li>
+        <li><a href="ai-studio.html">AI Aesthetic Studio</a></li>
+        <li><a href="results.html">לפני ואחרי</a></li>
+        <li><a href="faq.html">שאלות נפוצות</a></li>
+        <li><a href="articles.html">מאמרים</a></li>
+      </ul>
+    </nav>
+    <div class="nav__actions">
+      <a class="btn btn--primary btn--sm nav__cta" href="contact.html">קביעת ייעוץ</a>
+      <button class="burger" type="button" aria-expanded="false" aria-controls="drawer" aria-label="פתיחת תפריט">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<div class="drawer" id="drawer" aria-hidden="true" role="dialog" aria-modal="true" aria-label="תפריט">
+  <div class="shell">
+    <div class="drawer__top">
+      <span class="brand"><span class="brand__name">Dr. Amira Dabbagha</span><span class="brand__role">Medical Aesthetics</span></span>
+      <button class="drawer__close" type="button" aria-label="סגירת תפריט">✕</button>
+    </div>
+    <ul class="drawer__list">
+      <li><a href="index.html">בית</a></li>
+      <li><a href="dr-amira.html">ד״ר אמירה</a></li>
+      <li><a href="treatments.html">טיפולים</a></li>
+      <li><a href="ai-studio.html">AI Aesthetic Studio</a></li>
+      <li><a href="results.html">לפני ואחרי</a></li>
+      <li><a href="faq.html">שאלות נפוצות</a></li>
+      <li><a href="articles.html">מאמרים</a></li>
+      <li><a href="contact.html">יצירת קשר</a></li>
+    </ul>
+    <div class="drawer__foot">
+      <a class="btn btn--primary btn--block" href="contact.html">קביעת ייעוץ</a>
+    </div>
+  </div>
+</div>
+
+<main id="main">
+
+  <section class="page-head">
+    <div class="shell">
+      <ol class="crumbs">
+        <li><a href="index.html">בית</a></li>
+        <li>הצהרת נגישות</li>
+      </ol>
+      <div class="page-head__inner">
+        <span class="eyebrow">Accessibility</span>
+        <h1>הצהרת נגישות</h1>
+        <div class="rule"></div>
+        <p class="lead">האתר הזה נבנה מתוך הנחה שנגישות אינה תוספת אלא חלק מהעיצוב — במיוחד באתר שמשתמש בפסטלים ובטיפוגרפיה עדינה, שבו קל מאוד ליצור ניגודיות חלשה.</p>
+        <p class="micro">עדכון אחרון: אוגוסט 2026</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--tight section--ivory" style="padding-top:0">
+    <div class="shell">
+      <div class="split split--wide-start">
+
+        <div class="prose reveal">
+          <h2 id="standard">התקן שאליו אנחנו מכוונות</h2>
+          <p>האתר נבנה במטרה לעמוד בהנחיות <a href="https://www.w3.org/TR/WCAG22/" rel="noopener">WCAG 2.2</a> של ה־W3C ברמת התאמה AA.</p>
+          <h2 id="done">מה נעשה בפועל</h2>
+          <ul>
+          <li>מבנה כותרות היררכי ותקין בכל עמוד</li>
+          <li>קישור „דלגי לתוכן הראשי” בראש כל עמוד</li>
+          <li>טקסט חלופי לתמונות תוכן, ותמונות דקורטיביות מסומנות כך שקורא מסך יתעלם מהן</li>
+          <li>תוויות מקושרות לכל שדה בטופס, והודעות שגיאה בטקסט ולא בצבע בלבד</li>
+          <li>שימוש ב־ARIA רק במקום שבו HTML סמנטי אינו מספיק</li>
+          <li>יעדי לחיצה בגודל נוח למגע (מינימום 44–48 פיקסלים)</li>
+          <li>תמיכה בהגדלת טקסט וב־zoom בלי אובדן תוכן</li>
+          <li>כתיבה בכיווניות RTL תקינה, כולל טיפול נכון במונחים באנגלית בתוך טקסט עברי</li>
+          </ul>
+          <h2 id="contrast">ניגודיות צבעים</h2>
+          <p>פלטת הצבעים של האתר עדינה במכוון, ולכן צבעי הטקסט נבדקו מול הרקעים שבהם הם מופיעים. יחס הניגודיות של טקסט הגוף הראשי הוא כ־5.7:1 ושל הכותרות כ־9.6:1 מול הרקע הבהיר — מעל דרישת המינימום של 4.5:1 לטקסט רגיל לפי WCAG 2.2.</p>
+          <p>גוני ה־Taupe הבהירים משמשים לקווים, למסגרות ולאייקונים דקורטיביים בלבד, ולא לטקסט קריאה.</p>
+          <h2 id="keyboard">מקלדת ומיקוד</h2>
+          <p>כל האתר ניתן לתפעול מלא במקלדת: ניווט, תפריט, אקורדיונים, חלוניות, מחוון ההשוואה בין לפני ואחרי, ושאלון הייעוץ. סימון המיקוד גלוי בכל מקום ולא הוסר בשום רכיב. חלוניות נסגרות ב־Escape ומחזירות את המיקוד לנקודה שממנה נפתחו.</p>
+          <p>מחוון ההשוואה בין תמונות מבוסס על רכיב <code>input type="range"</code> אמיתי, כך שהוא נגיש במקלדת ולקוראי מסך גם ללא גרירה בעכבר.</p>
+          <h2 id="motion">אנימציות ותנועה</h2>
+          <p>האנימציות באתר איטיות ועדינות בכוונה. האתר מכבד את ההגדרה <code>prefers-reduced-motion</code> במערכת ההפעלה שלך: אם ביקשת להפחית תנועה, כל האנימציות והמעברים מבוטלים למעשה. אין באתר תוכן מהבהב, קופץ או מתנגן אוטומטית.</p>
+          <h2 id="ai">נגישות כלי ההדמיה</h2>
+          <p>כלי ההדמיה מבוסס על תמונה, ולכן יש בו מגבלה מובנית: תוצאה חזותית אינה ניתנת להעברה מלאה בטקסט. מה שכן נעשה:</p>
+          <ul>
+          <li>כל אזור בפנים ניתן לבחירה גם מרשימה טקסטואלית, ולא רק מנקודות על התמונה</li>
+          <li>מסך יישור התמונה ניתן לתפעול במקשי החצים</li>
+          <li>מה שנבחר ומה שמוצג מסוכם בטקסט לצד ההדמיה</li>
+          <li>ההבהרה על אופי ההדמיה מוצגת כטקסט ולא כתמונה</li>
+          </ul>
+          <p>הכלי אינו נדרש לשם קביעת ייעוץ. אפשר לקבוע ייעוץ ולקבל את כל המידע גם בלי להשתמש בו.</p>
+          <h2 id="gaps">מה עוד לא הושלם</h2>
+          <p>אנחנו מעדיפות לומר במפורש מה עוד פתוח:</p>
+          <ul>
+          <li>תמונות ה־Before &amp; After בגרסה הנוכחית הן ממלאות מקום; עם החלפתן בצילומים אמיתיים יש להשלים תיאור טקסטואלי מדויק לכל זוג.</li>
+          <li>סעיפים המסומנים בסוגריים מרובעים באתר ממתינים להשלמת תוכן מהקליניקה.</li>
+          <li>טרם בוצעה בדיקה ידנית מלאה בכל שילובי קוראי המסך והדפדפנים.</li>
+          </ul>
+          <h2 id="clinic">נגישות הקליניקה</h2>
+          <p class="micro">[להשלמה על ידי הקליניקה: נגישות הכניסה, חניה, מעלית, שירותים נגישים, ואפשרות התאמות בעת ביקור. יש לפרט גם למי לפנות לתיאום התאמה מראש.]</p>
+          <h2 id="feedback">דיווח על בעיית נגישות</h2>
+          <p>אם נתקלת בבעיה באתר — קושי בקריאה, רכיב שלא עובד במקלדת, או כל דבר אחר — נשמח לדעת ולתקן. אפשר לפנות דרך <a href="contact.html">עמוד יצירת הקשר</a> או בטלפון.</p>
+          <p class="micro">[להשלמה: שם רכז/ת הנגישות ודרכי התקשרות ישירות.]</p>
+
+          <div class="notice mt-4">
+            <span class="notice__title">שאלות על המדיניות הזו</span>
+            אפשר לפנות אלינו בכל שאלה או בקשה בנוגע למידע שלך דרך
+            <a href="contact.html">עמוד יצירת הקשר</a>, בטלפון או ב־WhatsApp.
+          </div>
+        </div>
+
+        <aside class="reveal" data-delay="2">
+          <nav class="toc" aria-label="תוכן העמוד">
+            <h2>בעמוד הזה</h2>
+            <ol>
+              <li><a href="#standard">התקן שאליו אנחנו מכוונות</a></li>
+              <li><a href="#done">מה נעשה בפועל</a></li>
+              <li><a href="#contrast">ניגודיות צבעים</a></li>
+              <li><a href="#keyboard">מקלדת ומיקוד</a></li>
+              <li><a href="#motion">אנימציות ותנועה</a></li>
+              <li><a href="#ai">נגישות כלי ההדמיה</a></li>
+              <li><a href="#gaps">מה עוד לא הושלם</a></li>
+              <li><a href="#clinic">נגישות הקליניקה</a></li>
+              <li><a href="#feedback">דיווח על בעיית נגישות</a></li>
+            </ol>
+          </nav>
+
+          <div class="card">
+            <h3 style="font-size:1.05rem">מסמכים נוספים</h3>
+            <ul>
+              <li><a href="privacy.html">מדיניות פרטיות</a></li>
+              <li><a href="ai-privacy.html">AI &amp; Image Privacy Policy</a></li>
+              <li><a href="accessibility.html">הצהרת נגישות</a></li>
+              <li><a href="terms.html">תנאי שימוש</a></li>
+            </ul>
+          </div>
+        </aside>
+
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="shell">
+    <div class="footer-grid">
+      <div>
+        <p class="footer-brand__name">Dr. Amira Dabbagha</p>
+        <p class="footer-brand__role">Medical Aesthetics</p>
+        <p style="max-width:38ch">אסתטיקה רפואית שמדגישה אותך — לא משנה אותך.</p>
+      </div>
+      <div>
+        <h4>ניווט</h4>
+        <ul class="footer-links">
+          <li><a href="dr-amira.html">ד״ר אמירה</a></li>
+          <li><a href="treatments.html">טיפולים</a></li>
+          <li><a href="ai-studio.html">AI Aesthetic Studio</a></li>
+          <li><a href="results.html">לפני ואחרי</a></li>
+          <li><a href="faq.html">שאלות נפוצות</a></li>
+          <li><a href="articles.html">מאמרים</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>יצירת קשר</h4>
+        <ul class="footer-links">
+          <li><a href="contact.html">קביעת תור</a></li>
+          <li><a href="https://wa.me/972000000000" rel="noopener">WhatsApp</a></li>
+          <li><a href="https://instagram.com/" rel="noopener">Instagram</a></li>
+          <li><a href="tel:+972000000000">טלפון</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span data-year>2026</span> Dr. Amira Dabbagha. כל הזכויות שמורות.</span>
+      <nav aria-label="מדיניות">
+        <a href="privacy.html">Privacy</a>
+        <a href="accessibility.html">Accessibility</a>
+        <a href="ai-privacy.html">AI Policy</a>
+        <a href="terms.html">Terms</a>
+      </nav>
+    </div>
+  </div>
+</footer>
+
+<nav class="bottom-nav" aria-label="ניווט מהיר">
+  <a href="index.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/></svg><span>בית</span></a>
+  <a href="treatments.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg><span>טיפולים</span></a>
+  <a href="ai-studio.html" class="bottom-nav__ai">
+    <span class="dot" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6zM18 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z"/></svg></span>
+    <span>AI</span>
+  </a>
+  <a href="results.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg><span>תוצאות</span></a>
+  <a href="contact.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg><span>תור</span></a>
+</nav>
+
+<a class="btn btn--primary book-bar" href="contact.html">קביעת ייעוץ</a>
+
+<script src="assets/js/site.js"></script>
+</body>
+</html>
