@@ -1,5 +1,13 @@
+# PREVIEW DEPLOYMENT - crawling is blocked on purpose.
+# The site still carries placeholder phone numbers and [bracketed]
+# credentials for a named doctor. Before going live on the real domain:
+#   1. replace this file with the Allow version below
+#   2. strip the noindex tags:  grep -rl PREVIEW-NOINDEX . 
+#   3. set the real host in sitemap.xml
 User-agent: *
-Allow: /
+Disallow: /
 
-# Replace REPLACE-WITH-DOMAIN with the live host before going live.
-Sitemap: https://REPLACE-WITH-DOMAIN/sitemap.xml
+# --- go-live version -------------------------------------------------------
+# User-agent: *
+# Allow: /
+# Sitemap: https://REPLACE-WITH-DOMAIN/sitemap.xml
