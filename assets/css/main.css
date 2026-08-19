@@ -1784,3 +1784,100 @@ body.has-bottom-nav { padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-i
   .site-header, .bottom-nav, .book-bar, .drawer, .sheet { display: none !important; }
   body { background: #fff; }
 }
+
+/* --------------------------------------------------------------------------
+   21. AI Mirror v2 — camera capture, quality gate, debug
+   Added with the move from a fixed guide oval to landmark-derived regions.
+   -------------------------------------------------------------------------- */
+
+/* The stage aspect ratio is set inline from the work canvas, so the overlay
+   and the image share one geometry and object-fit can never disagree. */
+.cam__stage {
+  position: relative;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--plum);
+  box-shadow: var(--shadow);
+  aspect-ratio: 1 / 1;
+}
+.cam__stage video,
+.cam__stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* Mirrored preview. The captured pixels are mirrored to match, so this is
+   presentation only and never affects the coordinates. */
+.cam__stage video { transform: scaleX(-1); }
+.cam__stage canvas { pointer-events: none; }
+
+.cam__hint {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 1rem;
+  margin: 0 auto;
+  width: fit-content;
+  max-width: 90%;
+  padding: .5rem 1rem;
+  border-radius: var(--radius-pill);
+  background: rgba(73, 58, 67, .82);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  font-size: .9375rem;
+  text-align: center;
+  transition: background var(--t-fast) var(--ease);
+}
+.cam__hint.is-ready { background: rgba(58, 104, 74, .88); }
+
+/* Gate failures are listed plainly: the visitor should know why, not guess. */
+.reject-list { list-style: none; padding: 0; margin: var(--space-2) 0 0; display: grid; gap: .5rem; }
+.reject-list li {
+  display: flex;
+  gap: .6rem;
+  align-items: flex-start;
+  margin: 0;
+  padding: .7rem .9rem;
+  border-radius: var(--radius-sm);
+  background: var(--rose);
+  font-size: .9375rem;
+  color: var(--ink);
+}
+.reject-list li::before { content: "!"; font-weight: 600; color: var(--plum); flex: none; }
+
+.debug-readout {
+  margin-top: var(--space-2);
+  padding: .75rem .9rem;
+  border: 1px solid var(--taupe-line);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: .6875rem;
+  line-height: 1.5;
+  color: var(--ink-muted);
+  direction: ltr;
+  text-align: left;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* Volume is the secondary control; de-emphasise intensity while it is open so
+   the primary question stays "how subtle", not "how many ml". */
+#intensityControls.is-secondary { opacity: .55; }
+#intensityControls.is-secondary input[type="range"] { pointer-events: none; }
+
+#volumeToggle[aria-pressed="true"] { border-color: var(--plum); background: var(--sage); }
+
+.studio.is-debug .studio__head::after {
+  content: "debugFace";
+  font-family: var(--font-en);
+  font-size: var(--fs-micro);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--white);
+  background: #B4453F;
+  padding: .2rem .5rem;
+  border-radius: var(--radius-pill);
+}

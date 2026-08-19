@@ -96,28 +96,14 @@ function buildScripts(imgMap) {
   if (site === before) throw new Error('site.js boot patch did not apply');
   if (site.includes("addEventListener('DOMContentLoaded'")) throw new Error('DOMContentLoaded still present');
 
-  // The shipped site saves the comparison image with an <a download>. The
-  // Artifact viewer never grants a page download permission, so that anchor
-  // is inert there. Route the save through a shim instead: the shim prefers
-  // the `downloads` capability and keeps the anchor as the fallback, so the
-  // same patched call works in both places.
-  let mirror = read('assets/js/mirror.js');
-  const anchorSave = `    c.toBlob(function (blob) {
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'amira-ai-mirror-preview.jpg';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
-    }, 'image/jpeg', 0.92);`;
-  if (!mirror.includes(anchorSave)) throw new Error('mirror.js download block not found');
-  mirror = mirror.replace(anchorSave, () =>
-`    c.toBlob(function (blob) {
-      window.__amiraSaveImage(blob, 'amira-ai-mirror-preview.jpg');
-    }, 'image/jpeg', 0.92);`);
+  /* mirror.js v2 already routes the save through window.__amiraSaveImage and
+     keeps an <a download> fallback inline, so nothing needs patching here. The
+     shim is simply present in the bundle and absent on the real site. */
+  const mirror = read('assets/js/mirror.js');
+  const faceMesh = read('assets/js/face-mesh.js');
+  const faceRegions = read('assets/js/face-regions.js');
 
-  return { data, site, mirror };
+  return { data, site, faceMesh, faceRegions, mirror };
 }
 
 /* The shim. Lives only in the bundle, never in the shipped site. */
@@ -177,6 +163,29 @@ function buildPages(imgMap) {
     });
 
     body = inlineImages(body, imgMap).trim();
+
+    /* The AI Mirror needs a ~15 MB local detection engine. Base64-encoding that
+       into a single file would exceed the Artifact size limit, so this preview
+       ships without it. Replace the upload panel's call to action with a plain
+       explanation instead of letting the engine fail on click. */
+    if (key === 'ai-studio.html') {
+      /* Point the engine at a path that cannot exist, so the bundle behaves the
+         same wherever it is opened. Without this it would silently succeed when
+         served from the real site's origin and fail in the Artifact, which would
+         make the notice below true in one place and false in the other. */
+      body = body.replace(
+        'data-vendor-base="assets/vendor/mediapipe"',
+        'data-vendor-base="__engine-not-bundled__"');
+      body = body.replace(
+        '<div class="drop mt-4" id="mirrorDrop">',
+        '<div class="notice notice--rose mt-4">' +
+          '<span class="notice__title">כלי ההדמיה אינו פעיל בתצוגה המקדימה הזו</span>' +
+          'הדמיית הפנים דורשת מנוע זיהוי מקומי בנפח כ־15MB, שאינו נכנס לקובץ התצוגה ' +
+          'המקדימה הבודד הזה. כל שאר האתר כאן מלא ופעיל. להפעלת ה־Mirror יש לפתוח את ' +
+          'הגרסה המתארחת של האתר.' +
+        '</div>' +
+        '<div class="drop mt-4" id="mirrorDrop" data-engine-missing="1">');
+    }
     pages[key] = { title: title.trim(), html: body, inline };
   }
   const n = Object.values(pages).reduce((a, p) => a + p.inline.length, 0);
@@ -229,7 +238,7 @@ function assertAscii(text, label) {
   'use strict';
   var PAGES   = __PAGES__;
   var SCRIPTS = __SCRIPTS__;
-  var ORDER   = ['data', 'site', 'mirror'];
+  var ORDER   = ['data', 'site', 'faceMesh', 'faceRegions', 'mirror'];
 
   var root = document.documentElement;
   root.lang = 'he';

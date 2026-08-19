@@ -1,0 +1,7 @@
+*.wasm binary
+*.task binary
+*.woff2 binary
+
+# Vendored third-party code: keep byte-exact so it stays verifiable against
+# upstream. Line-ending translation would change the hashes for no benefit.
+assets/vendor/** -text

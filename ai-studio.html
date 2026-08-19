@@ -110,21 +110,21 @@
     <div class="shell">
 
       <!-- ============================================ studio -->
-      <div class="studio" id="studio">
+      <div class="studio" id="studio" data-vendor-base="assets/vendor/mediapipe">
         <div class="studio__head">
           <span class="studio__mark">The Amira AI Mirror<sup>™</sup></span>
           <ol class="studio__stepper" id="studioStepper">
-            <li data-n="01" aria-current="step">01 <span>Upload</span></li>
-            <li data-n="02">02 <span>Align</span></li>
-            <li data-n="03">03 <span>Explore</span></li>
+            <li data-n="01" aria-current="step">01 <span>Capture</span></li>
+            <li data-n="02">02 <span>Face mapping</span></li>
+            <li data-n="03">03 <span>Areas</span></li>
             <li data-n="04">04 <span>Preview</span></li>
           </ol>
         </div>
 
         <div class="studio__body">
 
-          <!-- ---------------------------------------- 01 upload -->
-          <div class="studio__panel is-active" id="panelUpload">
+          <!-- ---------------------------------------- 01 start -->
+          <div class="studio__panel is-active" id="panelStart">
             <h2 class="script" style="font-size:clamp(1.8rem,4vw,2.6rem)">Your photo.<br>Your privacy.</h2>
             <p class="lead mt-2" style="max-width:52ch">
               לפני שאת מעלה משהו, זה מה שקורה עם התמונה שלך.
@@ -133,11 +133,11 @@
             <div class="privacy-block mt-3">
               <h3>Image handling</h3>
               <ul class="privacy-list">
-                <li><span aria-hidden="true">·</span><span><b>למה התמונה נדרשת:</b> ההדמיה עובדת על התמונה שלך כדי שההמחשה תהיה רלוונטית לפנים שלך ולא לדוגמה גנרית.</span></li>
-                <li><span aria-hidden="true">·</span><span><b>מי מעבד אותה:</b> הדפדפן שלך. העיבוד מתבצע מקומית במכשיר שלך.</span></li>
+                <li><span aria-hidden="true">·</span><span><b>למה התמונה נדרשת:</b> כדי למפות את מבנה הפנים שלך ולמקם את אזורי ההמחשה על האנטומיה שלך, ולא על תבנית כללית.</span></li>
+                <li><span aria-hidden="true">·</span><span><b>מי מעבד אותה:</b> הדפדפן שלך. גם מנוע זיהוי הפנים עצמו נטען מהאתר הזה ולא מספק חיצוני.</span></li>
                 <li><span aria-hidden="true">·</span><span><b>האם היא נשמרת:</b> לא. אין העלאה לשרת ואין שמירה בבסיס נתונים.</span></li>
                 <li><span aria-hidden="true">·</span><span><b>לכמה זמן:</b> עד שתסגרי או תרעני את העמוד. אז היא נמחקת מהזיכרון.</span></li>
-                <li><span aria-hidden="true">·</span><span><b>איך למחוק:</b> כפתור "התחלה מחדש" מוחק מיד, וכך גם סגירת הטאב.</span></li>
+                <li><span aria-hidden="true">·</span><span><b>איך למחוק:</b> כפתור „התחלה מחדש” מוחק מיד, וכך גם סגירת הטאב.</span></li>
                 <li><span aria-hidden="true">·</span><span><b>האם היא מועברת לספק AI חיצוני:</b> לא.</span></li>
                 <li><span aria-hidden="true">·</span><span><b>האם היא משמשת לאימון מודלים:</b> לא. זו ברירת המחדל וגם המדיניות שלנו.</span></li>
               </ul>
@@ -150,12 +150,13 @@
               <div class="drop__ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
               </div>
-              <h3>העלי או צלמי תמונת פנים</h3>
-              <p class="tiny" style="margin-inline:auto">גררי לכאן קובץ, או בחרי מהמכשיר.</p>
+              <h3>נתחיל בתמונת פנים</h3>
+              <p class="tiny" style="margin-inline:auto">גררי לכאן קובץ, בחרי מהמכשיר, או צלמי עכשיו.</p>
 
               <div class="btn-row" style="justify-content:center">
-                <label class="btn btn--primary" for="mirrorFile">בחירת תמונה</label>
-                <input class="sr-only" type="file" id="mirrorFile" accept="image/*" capture="user">
+                <label class="btn btn--primary" for="mirrorFile">העלאת תמונה</label>
+                <input class="sr-only" type="file" id="mirrorFile" accept="image/*">
+                <button class="btn btn--outline" type="button" id="btnCamera">צילום במצלמה</button>
               </div>
 
               <ul class="checklist">
@@ -163,8 +164,14 @@
                 <li>תאורה טובה ואחידה</li>
                 <li>ללא פילטר וללא עיבוד</li>
                 <li>ללא משקפי שמש וללא שיער שמכסה את הפנים</li>
-                <li>הבעה נייטרלית</li>
+                <li>הבעה נייטרלית, פנים שלמות בתוך התמונה</li>
               </ul>
+            </div>
+
+            <div class="notice notice--sage mt-3">
+              <span class="notice__title">טעינה חד־פעמית</span>
+              בפעם הראשונה נטען מנוע זיהוי הפנים (כ־15MB). הוא מגיע מהאתר הזה, נשמר במטמון הדפדפן,
+              ופועל מקומית במכשיר שלך. אין בכך שליחה של התמונה לשום מקום.
             </div>
 
             <div class="notice mt-3">
@@ -172,122 +179,146 @@
             </div>
           </div>
 
-          <!-- ---------------------------------------- 02 align -->
-          <div class="studio__panel" id="panelAlign">
-            <span class="eyebrow">Step 02 · Align</span>
-            <h2>התאימי את הפנים למסגרת</h2>
+          <!-- ---------------------------------------- camera -->
+          <div class="studio__panel" id="panelCamera">
+            <span class="eyebrow">Camera</span>
+            <h2>הכניסי את הפנים למסגרת</h2>
             <p class="lead" style="max-width:52ch">
-              גררי את התמונה כך שהעיניים יהיו על הקו העליון והפה על הקו התחתון.
-              זה מה שמאפשר לכלי לדעת איפה נמצא כל אזור.
+              המערכת עוקבת אחרי הפנים בזמן אמת. כפתור הצילום ייפתח רק כשהמיקום והזווית מתאימים.
             </p>
 
-            <div class="mapper mt-3">
-              <div>
-                <div class="face-stage" id="alignStage" tabindex="0" role="application"
-                     aria-label="גררי כדי למקם את הפנים בתוך המסגרת. ניתן להשתמש גם במקשי החצים.">
-                  <canvas id="alignCanvas" width="720" height="960"></canvas>
-                </div>
-                <p class="micro mt-2">בנייד: גררי באצבע. במקלדת: מקשי החצים, Shift לצעד גדול.</p>
+            <div class="cam mt-3">
+              <div class="cam__stage" id="camStage">
+                <video id="camVideo" playsinline muted></video>
+                <canvas id="camOverlay" aria-hidden="true"></canvas>
+                <p class="cam__hint" id="camHint">מחפשת פנים…</p>
               </div>
-
-              <div>
-                <div class="slider-row">
-                  <label for="alignZoom">גודל התמונה <output>זום</output></label>
-                  <input type="range" id="alignZoom" min="0.75" max="2.4" step="0.01" value="1">
-                </div>
-                <div class="btn-row">
-                  <button class="btn btn--ghost btn--sm" type="button" id="alignReset">איפוס מיקום</button>
-                  <button class="btn btn--ghost btn--sm" type="button" data-goto="upload">תמונה אחרת</button>
-                </div>
-
-                <div class="notice notice--sage mt-4">
-                  <span class="notice__title">למה זה חשוב</span>
-                  יישור מדויק משפיע ישירות על אמינות ההמחשה. אם הפנים לא ממורכזות,
-                  ההדמיה תסמן אזורים לא נכונים — ואז גם ההמחשה חסרת משמעות.
-                </div>
-
-                <div class="studio__actions">
-                  <button class="btn btn--primary" type="button" id="toExplore">להמשיך לבחירת אזורים</button>
-                </div>
+              <p class="tiny mt-2" id="camStatus" role="status"></p>
+              <div class="btn-row">
+                <button class="btn btn--primary" type="button" id="camShutter" disabled>צילום</button>
+                <button class="btn btn--ghost" type="button" id="camCancel">ביטול</button>
               </div>
+              <p class="micro mt-2">
+                תצוגת המצלמה מוצגת כמו במראה, והתמונה נשמרת באותו כיוון — כך שמה שראית הוא מה שנבדק.
+              </p>
             </div>
           </div>
 
-          <!-- ---------------------------------------- 03 explore -->
+          <!-- ---------------------------------------- analyzing -->
+          <div class="studio__panel" id="panelAnalyze">
+            <div class="processing">
+              <div class="processing__ring" aria-hidden="true"></div>
+              <p class="tiny" id="analyzeStatus" role="status">מכינה את התמונה…</p>
+              <p class="micro" style="max-width:40ch">
+                מיפוי 478 נקודות פנים מתבצע במכשיר שלך.
+              </p>
+            </div>
+          </div>
+
+          <!-- ---------------------------------------- rejected -->
+          <div class="studio__panel" id="panelReject">
+            <span class="eyebrow">Face mapping</span>
+            <h2>לא הצלחנו למפות את הפנים במדויק</h2>
+            <div class="rule"></div>
+            <p class="lead" style="max-width:52ch">
+              We couldn't map your face accurately.
+            </p>
+            <p>
+              אנחנו לא מציגות הדמיה כשהמיפוי אינו מדויק — עדיף לבקש תמונה נוספת
+              מאשר להראות לך סימון באזור שגוי. מה שחסר:
+            </p>
+            <ul class="reject-list" id="rejectList"></ul>
+            <pre class="debug-readout" id="rejectDebug" hidden></pre>
+
+            <div class="btn-row">
+              <button class="btn btn--primary" type="button" id="rejectRetry">תמונה נוספת</button>
+              <a class="btn btn--ghost" href="contact.html">לדלג ולקבוע ייעוץ</a>
+            </div>
+          </div>
+
+          <!-- ---------------------------------------- explore -->
           <div class="studio__panel" id="panelExplore">
-            <span class="eyebrow">Step 03 · Explore</span>
+            <span class="eyebrow">Treatment Preview Areas</span>
             <h2>רוצה לראות הדמיה אפשרית באזור הזה?</h2>
             <p class="lead" style="max-width:56ch">
-              לחצי על נקודה במפת הפנים או בחרי מהרשימה. שימי לב לניסוח:
-              הכלי שואל אם את רוצה לראות המחשה — הוא לא אומר לך שאת צריכה טיפול.
+              האזורים מחושבים מהפנים שזוהו בתמונה שלך. שימי לב לניסוח:
+              הכלי שואל אם את רוצה לראות המחשה — הוא לא אומר לך שאת צריכה טיפול,
+              ואינו מסמן נקודות הזרקה.
             </p>
 
             <div class="mapper mt-3">
               <div>
                 <div class="face-stage" id="faceStage">
-                  <canvas id="srcCanvas" width="720" height="960" aria-hidden="true" hidden></canvas>
-                  <canvas id="outCanvas" width="720" height="960"
-                          role="img" aria-label="תצוגה מקדימה של ההדמיה על התמונה שהעלית"></canvas>
-                  <div class="face-stage__pins" id="facePins"></div>
-                  <span class="ai-watermark">AI Preview · For illustration only</span>
+                  <canvas id="outCanvas" role="img"
+                          aria-label="התמונה שהעלית עם ההדמיה המוחלת על האזורים שנבחרו"></canvas>
+                  <canvas id="overlayCanvas" aria-hidden="true"></canvas>
+                  <span class="ai-watermark">AI Visual Simulation</span>
                 </div>
                 <p class="micro mt-2">
-                  ההדמיה מתעדכנת מיד עם כל שינוי. כל השינויים מתרחשים בדפדפן שלך.
+                  ההדמיה מתעדכנת מיד עם כל שינוי, בדפדפן שלך.
                 </p>
+                <pre class="debug-readout" id="debugReadout" hidden></pre>
               </div>
 
               <div>
-                <h3 style="font-size:1.05rem">אזורים</h3>
+                <h3 style="font-size:1.05rem">אזורי המחשה</h3>
                 <ul class="region-list" id="regionList"></ul>
 
-                <h3 class="mt-4" style="font-size:1.05rem">רמת ההמחשה</h3>
-                <div class="levels" role="radiogroup" aria-label="רמת ההמחשה">
-                  <div class="level">
-                    <input type="radio" name="mirrorLevel" id="lvl1" value="subtle" checked>
-                    <label class="level__box" for="lvl1">Subtle<small>עדין</small></label>
-                  </div>
-                  <div class="level">
-                    <input type="radio" name="mirrorLevel" id="lvl2" value="moderate">
-                    <label class="level__box" for="lvl2">Moderate<small>בינוני</small></label>
-                  </div>
-                  <div class="level">
-                    <input type="radio" name="mirrorLevel" id="lvl3" value="enhanced">
-                    <label class="level__box" for="lvl3">Enhanced<small>מודגש</small></label>
+                <div id="intensityControls" class="mt-4">
+                  <div class="slider-row">
+                    <label for="intensityRange">
+                      Preview intensity
+                      <output id="intensityOut">עדין</output>
+                    </label>
+                    <input type="range" id="intensityRange" min="0" max="100" value="35"
+                           aria-describedby="intensityHelp">
+                    <p class="micro" id="intensityHelp">
+                      Visual simulation level · רמת ההמחשה החזותית
+                    </p>
                   </div>
                 </div>
 
-                <div class="field mt-3" id="mlWrap" hidden>
-                  <label for="mlScenario">תרחיש נפח להמחשה (אופציונלי)</label>
-                  <select id="mlScenario">
-                    <option value="">ללא — לפי רמת ההמחשה שנבחרה</option>
-                    <option value="0.5">0.5 ml preview</option>
-                    <option value="1">1 ml preview</option>
-                  </select>
-                  <span class="hint">
-                    ה־ml כאן הוא תרחיש המחשה בלבד ולא חיזוי. אין הבטחה ש־1 מ״ל ייראה כפי שמוצג:
-                    התוצאה בפועל תלויה באנטומיה, בסוג החומר, בטכניקת ההזרקה ובגורמים נוספים.
-                    זו גם אינה המלצה על כמות.
-                  </span>
+                <div id="volumeWrap" class="mt-3" hidden>
+                  <button class="btn btn--ghost btn--sm" type="button" id="volumeToggle" aria-pressed="false">
+                    Explore by volume
+                  </button>
+                  <div id="volumeControls" hidden>
+                    <div class="slider-row">
+                      <label for="volumeRange">
+                        Amount preview
+                        <output id="volumeOut">1 ml</output>
+                      </label>
+                      <input type="range" id="volumeRange" min="0" max="7" step="1" value="2"
+                             aria-describedby="volumeHelp">
+                    </div>
+                    <p class="micro" id="volumeHelp">
+                      <b>Simulation intensity.</b>
+                      Approximate visual simulation — not a treatment recommendation.
+                      הכמות כאן היא תרחיש המחשה בלבד. אין הבטחה שכמות מסוימת תיראה כפי שמוצג,
+                      ואין בכך המלצה רפואית על כמות.
+                    </p>
+                  </div>
                 </div>
 
                 <p class="tiny mt-3" id="exploreHint">בחרי אזור אחד לפחות כדי להמשיך.</p>
 
                 <div class="studio__actions">
                   <button class="btn btn--primary" type="button" id="toResult" disabled>ליצירת הדמיה</button>
-                  <button class="btn btn--ghost" type="button" data-goto="align">חזרה ליישור</button>
+                  <button class="btn btn--ghost" type="button" data-goto="start">תמונה אחרת</button>
                 </div>
               </div>
             </div>
 
             <div class="notice notice--rose mt-4">
               <span class="notice__title">חשוב לדעת על מה שאת רואה</span>
-              ההמחשה משנה בעדינות גיאומטריה ומרקם בתמונה. היא אינה מודל שמנבא תוצאה קלינית,
-              והיא אינה מתחשבת בעובי העור, במבנה העצם, בכלי הדם, בהיסטוריה הרפואית שלך או בסוג החומר.
+              ההמחשה משנה בעדינות גיאומטריה ומרקם בתמונה, בתוך אזורים שחושבו ממבנה הפנים שלך.
+              היא אינה מודל שמנבא תוצאה קלינית, והיא אינה מתחשבת בעובי העור, במבנה העצם,
+              בכלי הדם, בהיסטוריה הרפואית שלך או בסוג החומר.
               רק בדיקה אצל ד״ר אמירה יכולה לתת מענה על השאלות האלה.
             </div>
           </div>
 
-          <!-- ---------------------------------------- 04 result -->
+          <!-- ---------------------------------------- result -->
           <div class="studio__panel" id="panelResult">
             <div class="processing" id="resultWait">
               <div class="processing__ring" aria-hidden="true"></div>
@@ -295,23 +326,23 @@
             </div>
 
             <div id="resultView" hidden>
-              <span class="eyebrow">Step 04 · Preview</span>
+              <span class="eyebrow">Preview</span>
               <h2>Original ↔ AI Preview</h2>
               <p class="lead" style="max-width:52ch">גררי את הקו כדי להשוות. הפילוסופיה כאן היא Less is beautiful.</p>
 
               <div class="result-grid mt-3">
                 <div>
-                  <div class="compare compare--tall" id="resultCompare">
-                    <div class="compare__layer"><canvas id="cmpBefore" width="720" height="960"></canvas></div>
-                    <div class="compare__layer compare__layer--after"><canvas id="cmpAfter" width="720" height="960"></canvas></div>
+                  <div class="compare" id="resultCompare">
+                    <div class="compare__layer"><canvas id="cmpBefore"></canvas></div>
+                    <div class="compare__layer compare__layer--after"><canvas id="cmpAfter"></canvas></div>
                     <input class="compare__range" type="range" min="0" max="100" value="50" aria-label="השוואה בין המקור להדמיה">
                     <div class="compare__handle"><span class="compare__grip" aria-hidden="true">◂▸</span></div>
                     <span class="compare__tag compare__tag--a">Original</span>
                     <span class="compare__tag compare__tag--b">AI Preview</span>
-                    <span class="ai-watermark">AI Preview · For illustration only</span>
+                    <span class="ai-watermark">AI Visual Simulation</span>
                   </div>
                   <p class="result-note">
-                    הדמיה לצורכי המחשה בלבד · אינה תחזית ואינה הבטחה לתוצאה
+                    AI VISUAL SIMULATION · המחשה משוערת בלבד, אינה תחזית ואינה הבטחה לתוצאה
                   </p>
                 </div>
 
@@ -362,13 +393,24 @@
           <h2>מה הכלי הזה עושה — ומה הוא לא</h2>
           <div class="rule"></div>
           <p>
-            אנחנו מעדיפות לומר לך את זה בפירוש במקום להסתיר את זה בתנאי השימוש:
-            הכלי הזה הוא מנוע המחשה גיאומטרי־אופטי. הוא מזיז ומרכך פיקסלים באזור שבחרת
-            בעוצמה מוגבלת מראש. הוא לא מודל שאומן על תוצאות טיפול, והוא לא מנבא תוצאה.
+            אנחנו מעדיפות לומר לך את זה בפירוש במקום להסתיר את זה בתנאי השימוש.
+            הכלי בנוי משני חלקים, וההבחנה ביניהם היא כל העניין.
           </p>
           <p>
-            החלטנו כך משתי סיבות. הראשונה — פרטיות: כשאין שליחה לשרת, אין מה לדלוף.
-            השנייה — יושרה: מודל שמציג "תוצאה" מבטיח דבר שאף אחד לא יכול להבטיח דרך מסך.
+            <b>הראשון הוא זיהוי.</b> מודל אמיתי של למידת מכונה מאתר 478 נקודות מבנה
+            על הפנים שלך, ומהן מחושבים אזורי ההמחשה. לכן הסימון נצמד לשפתיים,
+            ללחיים ולקו הלסת <em>שלך</em> — ולא לאחוזים קבועים על גבי התמונה.
+          </p>
+          <p>
+            <b>השני הוא ההמחשה.</b> כאן זה מנוע גיאומטרי־אופטי שכתבנו: הוא מזיז ומרכך
+            פיקסלים בתוך האזורים שזוהו, בעוצמה מוגבלת מראש. הוא <b>אינו</b> מודל שאומן
+            על תוצאות טיפול, ולכן אינו מנבא תוצאה.
+          </p>
+          <p>
+            כלומר: המערכת יודעת לזהות איפה נמצאים האזורים בפנים שלך במדויק, אבל אינה
+            יודעת — ואינה מתיימרת לדעת — איך תיראי אחרי טיפול. אלה שני דברים שונים.
+            שמרנו על ההפרדה הזו משתי סיבות: פרטיות, כי הזיהוי רץ במכשיר שלך ואין מה לדלוף;
+            ויושרה, כי מודל שמציג „תוצאה” מבטיח דבר שאף אחד לא יכול להבטיח דרך מסך.
           </p>
         </div>
         <div class="reveal" data-delay="2">
@@ -378,6 +420,7 @@
               <li>שפה משותפת לשיחה עם הרופאה</li>
               <li>הבנה של כיוון: עדין, בינוני או מודגש</li>
               <li>תחושת סדר גודל — כמה קטן שינוי יכול להיות</li>
+              <li>סימון שנצמד לאנטומיה שלך, לא לתבנית</li>
               <li>מקום להתלבט בו בשקט, בלי לחץ</li>
             </ul>
           </div>
@@ -387,6 +430,7 @@
               <li>לא תחזית לתוצאה שלך</li>
               <li>לא המלצה על טיפול או על כמות</li>
               <li>לא אבחון ולא הערכת התאמה רפואית</li>
+              <li>לא סימון של נקודות הזרקה</li>
               <li>לא חלופה לבדיקה פיזית</li>
             </ul>
           </div>
@@ -511,6 +555,8 @@
 <a class="btn btn--primary book-bar" href="contact.html">קביעת ייעוץ</a>
 
 <script src="assets/js/site.js"></script>
+<script src="assets/js/face-mesh.js"></script>
+<script src="assets/js/face-regions.js"></script>
 <script src="assets/js/mirror.js"></script>
 </body>
 </html>
