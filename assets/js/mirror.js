@@ -1,35 +1,24 @@
 /* ==========================================================================
-   The Amira AI Mirror — aesthetic simulation, v2 (landmark driven)
+   AMEERA DABAJA — AI Visual Simulation
+   Natural. Anatomical. Product-aware.
    --------------------------------------------------------------------------
    PRIVACY BY ARCHITECTURE. The photo never leaves the device. No fetch, no
-   upload, no third-party model call — the detection engine itself is vendored
-   locally under assets/vendor/mediapipe/. Everything below runs on canvases in
-   the visitor's browser and is discarded on page unload.
+   upload, no third-party model call — the detection engine is vendored locally.
+   Everything runs on canvases here and is discarded on page unload.
 
-   ONE COORDINATE SYSTEM. Every pixel operation happens on a single "work
-   canvas" built once from the source. Landmarks are normalised to that canvas;
-   every overlay canvas has exactly its aspect ratio and is never subject to
-   object-fit. There is no second geometry to keep in sync, so the class of bug
-   where an overlay drifts from the image cannot occur:
+   ONE COORDINATE SYSTEM. A single work canvas; landmarks normalised to it;
+   overlays carry exactly its aspect ratio and never meet object-fit. Selfie
+   mirroring is resolved once, at capture, so nothing downstream needs to know
+   a camera was involved and the mirror state cannot disagree with the mapping.
 
-       source image / video frame
-            -> work canvas  (fixed max edge, aspect preserved)
-            -> landmarks    (normalised to the work canvas)
-            -> frame        (origin between the eyes, unit = interocular)
-            -> regions      (polygons in that frame)
-            -> masks        (feathered rasterisation of those polygons)
-            -> deformation  (weighted by the mask alpha, nothing outside it)
+   NO MASKS. Deformation is a 3D mesh warp (see face-warp.js): vertices move
+   along surface normals, reproject through a weak-perspective camera, and the
+   original pixels are resampled triangle by triangle. There is no region
+   boundary to see, and the texture is carried rather than averaged.
 
-   SELFIE MIRRORING is resolved once, at capture: the frame is written into the
-   work canvas already mirrored, so what the visitor saw is what gets analysed.
-   Nothing downstream needs to know a camera was involved.
-
-   FAIL CLOSED. If the quality gate rejects the photo there is no preview at
-   all — not a degraded one. A plausible-looking wrong mapping is worse than a
-   refusal, because the visitor cannot tell it is wrong.
-
-   HONESTY. The deformation is a geometric/optical model, deliberately not a
-   predictive one, and its magnitude is capped. Less is beautiful.
+   FAIL CLOSED, TWICE. Once on the photo (pose, framing, resolution), once on
+   the simulation itself (mesh folds, displacement ceiling, identity drift,
+   background movement, texture loss). Either refusal means no preview at all.
    ========================================================================== */
 (function () {
   'use strict';
@@ -40,86 +29,79 @@
   var studio = $('#studio');
   if (!studio) return;
 
-  var WORK_MAX = 1100;          // longest edge of the work canvas
-  /* Blur sigma as a fraction of interocular distance. Chosen so the mask
-     fades out within ~0.1 interocular of the polygon edge: a canvas blur
-     spreads about 2.5 sigma, and anything wider let one region's effect
-     reach the neighbouring feature. */
-  var FEATHER_K = 0.04;
+  var WORK_MAX = 1100;
   var DEBUG = /[?&]debugFace=1/.test(location.search);
+  var CLINICIAN = /[?&]clinician=1/.test(location.search);
 
-  /* Volume scenarios offered in "Explore by volume". Illustration only. */
-  var VOLUMES = [0, 0.5, 1, 1.5, 2, 2.5, 3, 4];
+  /* Amount range in millilitres — a visual scenario scale. The conversion to
+     surface projection lives in face-regions.js (mmPerMl). */
+  var ML_MIN = 0.1, ML_MAX = 2.0, ML_STEP = 0.1;
+
+  /* Two presentation levels. Not "before/after": both are simulations. */
+  var LEVELS = {
+    natural:  { label: 'Natural Preview',  he: 'עדין',  gain: 0.62 },
+    enhanced: { label: 'Enhanced Preview', he: 'מודגש', gain: 1.0 }
+  };
+
+  /* ------------------------------------------------------------- products
+     The neutral profile is the only one shipped. The branded table is
+     deliberately EMPTY: those multipliers would be physical claims about named
+     prescription medical devices, and inventing them would mean fabricating
+     manufacturer data. Populate from IFU figures, then it enables itself. */
+  var NEUTRAL = {
+    id: 'neutral', brand: '', name: 'פרופיל נייטרלי', family: 'HA',
+    profile: { projection: 1, spread: 1, firmness: null }, source: 'neutral default'
+  };
+  var BRANDED = [];
+  var PRODUCTS_READY = BRANDED.length > 0;
 
   /* ------------------------------------------------------------------ state */
   var S = {
-    work: null,          // {canvas, ctx, w, h}
-    base: null,          // ImageData of the untouched work canvas
-    landmarks: null,
-    frame: null,
-    regions: null,
-    sets: null,
-    gate: null,
-    active: [],
-    intensity: 0.35,     // primary control, 0..1
-    volumeMode: false,
-    volumeMl: 1,
-    consented: false,
-    stream: null,
-    rafId: 0,
-    camReady: 0
+    work: null, base: null, baseData: null,
+    landmarks: null, frame: null, regions: null, mesh: null,
+    sets: null, gate: null, calib: null,
+    active: [], amounts: {},
+    product: NEUTRAL, level: 'natural',
+    consented: false, stream: null, rafId: 0, camReady: 0,
+    lastAudit: null
   };
 
   /* -------------------------------------------------------------------- DOM */
   var panels = {
-    start:   $('#panelStart'),
-    camera:  $('#panelCamera'),
-    analyze: $('#panelAnalyze'),
-    reject:  $('#panelReject'),
-    explore: $('#panelExplore'),
-    result:  $('#panelResult')
+    start: $('#panelStart'), camera: $('#panelCamera'), analyze: $('#panelAnalyze'),
+    reject: $('#panelReject'), explore: $('#panelExplore'), result: $('#panelResult')
   };
-  var stepper = $$('#studioStepper li');
-
-  var faceStage   = $('#faceStage');
-  var outCanvas   = $('#outCanvas');
-  var overlay     = $('#overlayCanvas');
-  var cmpBefore   = $('#cmpBefore');
-  var cmpAfter    = $('#cmpAfter');
-  var regionList  = $('#regionList');
+  var stepper    = $$('#studioStepper li');
+  var faceStage  = $('#faceStage');
+  var outCanvas  = $('#outCanvas');
+  var overlay    = $('#overlayCanvas');
+  var cmpBefore  = $('#cmpBefore');
+  var cmpAfter   = $('#cmpAfter');
+  var regionList = $('#regionList');
   var consentSheet = $('#consentSheet');
 
   var octx = outCanvas.getContext('2d', { willReadFrequently: true });
   var vctx = overlay.getContext('2d');
   var bctx = cmpBefore.getContext('2d');
-  var fctx = cmpAfter.getContext('2d');
+  var fctx = cmpAfter.getContext('2d', { willReadFrequently: true });
 
-  /* ---------------------------------------------------------------- panels */
   function go(name) {
     Object.keys(panels).forEach(function (k) {
       if (panels[k]) panels[k].classList.toggle('is-active', k === name);
     });
     var order = { start: 0, camera: 0, analyze: 1, reject: 1, explore: 2, result: 3 };
-    var at = order[name];
     stepper.forEach(function (li, n) {
-      if (n === at) li.setAttribute('aria-current', 'step');
+      if (n === order[name]) li.setAttribute('aria-current', 'step');
       else li.removeAttribute('aria-current');
     });
     var head = $('.studio__head', studio);
     if (head) head.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
-
-  function setStatus(el, text) { if (el) el.textContent = text; }
+  function setStatus(el, t) { if (el) el.textContent = t; }
 
   /* =======================================================================
-     1. Work canvas — the single coordinate system
+     Work canvas
      ======================================================================= */
-
-  /**
-   * Draws `source` into a fresh work canvas, aspect preserved, longest edge
-   * clamped to WORK_MAX. `mirror` flips horizontally at write time so that
-   * downstream code never has to know about it.
-   */
   function makeWork(source, sw, sh, mirror) {
     var scale = Math.min(1, WORK_MAX / Math.max(sw, sh));
     var w = Math.max(1, Math.round(sw * scale));
@@ -133,31 +115,17 @@
     ctx.restore();
     return { canvas: canvas, ctx: ctx, w: w, h: h };
   }
-
-  /**
-   * Pixel canvases are sized to EXACTLY the work canvas. putImageData ignores
-   * the context transform and writes device pixels, so a DPR-scaled backing
-   * store would leave the image in the top-left corner. CSS scales it instead.
-   */
-  function sizeExact(canvas, w, h) {
-    canvas.width = w;
-    canvas.height = h;
-    canvas.style.aspectRatio = w + ' / ' + h;
-  }
-
-  /**
-   * Vector overlays DO want the device resolution, so strokes stay crisp. The
-   * transform lets us keep drawing in work-canvas units.
-   */
-  function sizeCrisp(canvas, w, h) {
+  /* putImageData ignores the transform, so pixel canvases stay 1:1 with the
+     work canvas and CSS does the scaling. */
+  function sizeExact(c, w, h) { c.width = w; c.height = h; c.style.aspectRatio = w + ' / ' + h; }
+  function sizeCrisp(c, w, h) {
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
-    canvas.style.aspectRatio = w + ' / ' + h;
+    c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+    c.style.aspectRatio = w + ' / ' + h;
   }
 
   /* =======================================================================
-     2. Engine loading (lazy, explicit intent only)
+     Engine
      ======================================================================= */
   var ENGINE_STEPS = {
     engine: 'טוענת את מנוע זיהוי הפנים…',
@@ -165,19 +133,6 @@
     model:  'טוענת את מודל 478 הנקודות…',
     ready:  'המנוע מוכן.'
   };
-
-  function ensureEngine(statusEl) {
-    setStatus(statusEl, ENGINE_STEPS.engine);
-    return window.AmiraFaceMesh.load({
-      vendorBase: studio.dataset.vendorBase || 'assets/vendor/mediapipe',
-      onProgress: function (step) { setStatus(statusEl, ENGINE_STEPS[step] || ''); }
-    }).then(function (lib) {
-      S.sets = window.AmiraFaceRegions.buildSets(lib.FaceLandmarker);
-      if (!S.sets) throw { code: 'no_sets', message: 'landmark index sets unavailable' };
-      return lib;
-    });
-  }
-
   var ENGINE_ERRORS = {
     engine_unavailable: 'מנוע זיהוי הפנים אינו זמין בגרסה הזו של העמוד.',
     no_simd: 'הדפדפן הזה אינו תומך בטכנולוגיה הנדרשת (WebAssembly SIMD). נסי דפדפן מעודכן.',
@@ -185,10 +140,21 @@
     engine_error: 'לא הצלחנו לטעון את מנוע זיהוי הפנים.'
   };
 
-  /* =======================================================================
-     3. Analysis + the quality gate
-     ======================================================================= */
+  function ensureEngine(statusEl) {
+    setStatus(statusEl, ENGINE_STEPS.engine);
+    return window.AmiraFaceMesh.load({
+      vendorBase: studio.dataset.vendorBase || 'assets/vendor/mediapipe',
+      onProgress: function (s) { setStatus(statusEl, ENGINE_STEPS[s] || ''); }
+    }).then(function (lib) {
+      S.sets = window.AmiraFaceRegions.buildSets(lib.FaceLandmarker);
+      if (!S.sets) throw { code: 'no_sets' };
+      return lib;
+    });
+  }
 
+  /* =======================================================================
+     Analysis, calibration and the photo gate
+     ======================================================================= */
   var PROBLEM_TEXT = {
     no_face:        'לא זיהינו פנים בתמונה.',
     multiple_faces: 'זיהינו יותר מפנים אחת. נדרשת תמונה של אדם אחד בלבד.',
@@ -201,23 +167,49 @@
     cropped:        'הפנים חתוכות בקצה התמונה. נדרשות פנים שלמות, כולל סנטר ומצח.',
     no_frame:       'לא הצלחנו למפות את מבנה הפנים בצורה אמינה.',
     low_detail:     'התמונה ברזולוציה נמוכה מדי לאזור הפנים.',
-    no_pose_alt:    'לא הצלחנו לחשב את זווית הפנים.'
+    no_mesh:        'לא הצלחנו לבנות את מודל הפנים התלת־ממדי.',
+    /* simulation-side refusals */
+    mesh_fold:      'ההדמיה יצרה עיוות לא תקין במודל הפנים.',
+    displacement:   'השינוי המבוקש גדול מדי להדמיה אמינה.',
+    anchor_moved:   'ההדמיה חרגה מאזור הפנים.',
+    identity_eyes:  'ההדמיה הזיזה את אזור העיניים.',
+    identity_nose:  'ההדמיה הזיזה את אזור האף.',
+    identity_brows: 'ההדמיה הזיזה את אזור הגבות.',
+    background_changed: 'ההדמיה שינתה את הרקע.',
+    texture_lost:   'ההדמיה פגעה במרקם העור.'
   };
 
   /**
-   * Runs detection + both halves of the gate on the current work canvas.
-   * Returns {ok, problems, metrics}. On success, S.landmarks/frame/regions are
-   * populated; on failure they are cleared, so no stale mapping can be drawn.
+   * Face calibration. Every figure comes from the detected landmarks and is
+   * expressed in millimetres through the scenario interocular scale, so it is
+   * comparable between photos instead of being a pixel count. The asterisk in
+   * the UI marks that the scale is assumed, not measured on the visitor.
    */
+  function calibrate(frame, size) {
+    var a = frame.anchors;
+    var iodPx = frame.scale * size.w;
+    var mm = function (u) { return +(u * window.AmiraFaceWarp.IOD_MM).toFixed(1); };
+    var wEye = frame.widthAt(0);
+    var wMouth = frame.widthAt(a.vMouth);
+    return {
+      interocularPx: Math.round(iodPx),
+      faceWidth: wEye ? mm(Math.abs(wEye.hi - wEye.lo)) : null,
+      faceHeight: mm(a.vChin - a.vTop),
+      lipWidth: mm(a.uMouthR - a.uMouthL),
+      lipHeight: mm(a.vMouthBottom - a.vMouthTop),
+      chinProjection: mm(a.vChin - a.vMouthBottom),
+      midfaceWidth: wMouth ? mm(Math.abs(wMouth.hi - wMouth.lo)) : null,
+      symmetry: frame.asymmetry != null ? +(1 - frame.asymmetry).toFixed(3) : null,
+      rollDeg: null, offAxisDeg: null
+    };
+  }
+
   function analyse() {
-    S.landmarks = null; S.frame = null; S.regions = null;
+    S.landmarks = null; S.frame = null; S.regions = null; S.mesh = null; S.calib = null;
 
     var result;
-    try {
-      result = window.AmiraFaceMesh.detectImage(S.work.canvas);
-    } catch (e) {
-      return { ok: false, problems: [{ code: 'engine_error', message: String(e) }], metrics: {} };
-    }
+    try { result = window.AmiraFaceMesh.detectImage(S.work.canvas); }
+    catch (e) { return { ok: false, problems: [{ code: 'engine_error' }], metrics: {} }; }
 
     var size = { w: S.work.w, h: S.work.h };
     var gate = window.AmiraFaceMesh.assess(result, size);
@@ -225,47 +217,196 @@
       return p.code === 'no_face' || p.code === 'multiple_faces';
     })) return gate;
 
-    var aspect = S.work.w / S.work.h;
-    var frame = window.AmiraFaceRegions.buildFrame(gate.landmarks, S.sets, aspect);
+    var frame = window.AmiraFaceRegions.buildFrame(gate.landmarks, S.sets, S.work.w / S.work.h);
     window.AmiraFaceMesh.assessFrame(frame, size, gate.problems, gate.metrics);
     gate.ok = gate.problems.length === 0;
-
     if (!gate.ok) return gate;
+
+    var regions = window.AmiraFaceRegions.build(frame);
+    /* Eyes, brows and the nose line are guarded: the deformation field is
+       attenuated to zero around them so identity cannot drift. */
+    var guard = (S.sets.eyeA || []).concat(S.sets.eyeB || [],
+                                          S.sets.browA || [], S.sets.browB || [],
+                                          [1, 4, 5, 6, 195, 197]);
+    var mesh = window.AmiraFaceWarp.buildMesh(gate.landmarks, frame, S.work.w, S.work.h, guard);
+    if (!regions || !mesh) {
+      gate.ok = false;
+      gate.problems.push({ code: 'no_mesh' });
+      return gate;
+    }
 
     S.landmarks = gate.landmarks;
     S.frame = frame;
-    S.regions = window.AmiraFaceRegions.build(frame);
-    if (!S.regions || !Object.keys(S.regions).length) {
-      gate.ok = false;
-      gate.problems.push({ code: 'no_frame', message: 'no regions could be built' });
-      S.landmarks = null; S.frame = null; S.regions = null;
-    }
+    S.regions = regions;
+    S.mesh = mesh;
+    S.calib = calibrate(frame, size);
+    S.calib.rollDeg = gate.metrics.rollDeg;
+    S.calib.offAxisDeg = gate.metrics.offAxisDeg;
     return gate;
   }
 
-  function showRejection(gate) {
-    var list = $('#rejectList');
-    if (list) {
-      var seen = {};
-      list.innerHTML = gate.problems.filter(function (p) {
-        if (seen[p.code]) return false;
-        seen[p.code] = 1; return true;
-      }).map(function (p) {
-        return '<li>' + (PROBLEM_TEXT[p.code] || p.message) + '</li>';
-      }).join('');
-    }
+  function listProblems(el, problems) {
+    if (!el) return;
+    var seen = {};
+    el.innerHTML = (problems || []).filter(function (p) {
+      if (seen[p.code]) return false; seen[p.code] = 1; return true;
+    }).map(function (p) {
+      return '<li>' + (PROBLEM_TEXT[p.code] || p.message || p.code) + '</li>';
+    }).join('');
+  }
+
+  function showRejection(problems, metrics) {
+    listProblems($('#rejectList'), problems);
     var dbg = $('#rejectDebug');
-    if (dbg) {
-      dbg.hidden = !DEBUG;
-      if (DEBUG) dbg.textContent = JSON.stringify(gate.metrics, null, 1);
-    }
+    if (dbg) { dbg.hidden = !DEBUG; if (DEBUG) dbg.textContent = JSON.stringify(metrics || {}, null, 1); }
     go('reject');
   }
 
   /* =======================================================================
-     4. Masks — feathered rasterisation of a region polygon
+     Plan: area + product + amount
      ======================================================================= */
+  function defOf(key) {
+    var c = window.AmiraFaceRegions.CATALOGUE;
+    for (var i = 0; i < c.length; i++) if (c[i].key === key) return c[i];
+    return null;
+  }
 
+  function buildPlan(opts) {
+    opts = opts || {};
+    var gain = opts.gain != null ? opts.gain : LEVELS[S.level].gain;
+    var plan = [];
+    S.active.forEach(function (key) {
+      var def = defOf(key);
+      if (!def || def.op !== 'volume') return;
+      var ml = opts.ml != null ? opts.ml : (S.amounts[key] != null ? S.amounts[key] : 0.5);
+      plan.push({
+        regionKey: key, ml: ml,
+        mm: ml * (def.mmPerMl || 1) * gain,
+        profile: S.product.profile
+      });
+    });
+    return plan;
+  }
+
+  function softenDefs() {
+    return S.active.map(defOf).filter(function (d) { return d && d.op === 'soften'; });
+  }
+
+  /* =======================================================================
+     Expression-area softening — analytic field, no mask
+     ======================================================================= */
+  function applySoften(ctx, defs, gain) {
+    if (!defs.length) return;
+    var W = S.work.w, H = S.work.h;
+    var img = ctx.getImageData(0, 0, W, H);
+    var out = img.data;
+    var src = new Uint8ClampedArray(out);
+    var f = S.frame;
+    var iodPx = f.scale * W;
+    var warp = window.AmiraFaceWarp;
+
+    defs.forEach(function (def) {
+      var region = S.regions[def.key];
+      if (!region) return;
+      var polys = region.parts.map(function (p) { return p.local; });
+      var pad = def.transition * iodPx * 1.2;
+      var x0 = W, y0 = H, x1 = 0, y1 = 0;
+      region.parts.forEach(function (p) {
+        p.image.forEach(function (q) {
+          x0 = Math.min(x0, q.x * W); x1 = Math.max(x1, q.x * W);
+          y0 = Math.min(y0, q.y * H); y1 = Math.max(y1, q.y * H);
+        });
+      });
+      x0 = Math.max(0, Math.floor(x0 - pad)); x1 = Math.min(W - 1, Math.ceil(x1 + pad));
+      y0 = Math.max(0, Math.floor(y0 - pad)); y1 = Math.min(H - 1, Math.ceil(y1 + pad));
+
+      var cutV = def.clipBelowBrow != null ? f.anchors.vBrow - def.clipBelowBrow : null;
+      var rad = Math.max(1, Math.round(iodPx * 0.030));
+      /* Capped: this is line softening, not skin smoothing. The texture audit
+         rejects the result if detail collapses anyway. */
+      var maxBlend = 0.42 * (def.soften || 1) * gain;
+
+      for (var y = y0; y <= y1; y++) {
+        for (var x = x0; x <= x1; x++) {
+          var local = f.toLocal({ x: (x / W) * f.aspect, y: y / H });
+          if (cutV != null && local.v > cutV) continue;
+          var w = warp.regionWeight(local, polys, def.transition);
+          if (w <= 0.004) continue;
+          var alpha = maxBlend * w;
+
+          var i = (y * W + x) << 2;
+          var sr = 0, sg = 0, sb = 0, n = 0;
+          var ay0 = Math.max(0, y - rad), ay1 = Math.min(H - 1, y + rad);
+          var ax0 = Math.max(0, x - rad), ax1 = Math.min(W - 1, x + rad);
+          for (var yy = ay0; yy <= ay1; yy += 2) {
+            for (var xx = ax0; xx <= ax1; xx += 2) {
+              var j = (yy * W + xx) << 2;
+              sr += src[j]; sg += src[j + 1]; sb += src[j + 2]; n++;
+            }
+          }
+          if (!n) continue;
+          out[i]     = src[i]     + (sr / n - src[i])     * alpha;
+          out[i + 1] = src[i + 1] + (sg / n - src[i + 1]) * alpha;
+          out[i + 2] = src[i + 2] + (sb / n - src[i + 2]) * alpha;
+        }
+      }
+    });
+    ctx.putImageData(img, 0, 0);
+  }
+
+  /* =======================================================================
+     Simulate — the one path that produces every preview
+     ======================================================================= */
+  function simulate(targetCtx, opts) {
+    opts = opts || {};
+    var warp = window.AmiraFaceWarp;
+    var plan = buildPlan(opts);
+    var softens = softenDefs();
+    var audit = { ok: true, problems: [], metrics: {} };
+
+    if (plan.length) {
+      var dst = warp.deform(S.mesh, S.regions, plan);
+      audit = warp.audit(S.mesh, dst, S.regions, plan);
+      if (!audit.ok) return { ok: false, audit: audit };
+      warp.render(S.work.canvas, targetCtx, S.mesh, dst);
+    } else {
+      targetCtx.setTransform(1, 0, 0, 1, 0, 0);
+      targetCtx.clearRect(0, 0, S.work.w, S.work.h);
+      targetCtx.drawImage(S.work.canvas, 0, 0);
+    }
+
+    if (softens.length) {
+      applySoften(targetCtx, softens, opts.gain != null ? opts.gain : LEVELS[S.level].gain);
+    }
+
+    var outData = targetCtx.getImageData(0, 0, S.work.w, S.work.h).data;
+    var px = warp.auditPixels(S.baseData, outData, S.mesh, S.work.w, S.work.h);
+    if (!px.ok) { audit.ok = false; audit.problems = audit.problems.concat(px.problems); }
+    Object.keys(px.metrics).forEach(function (k) { audit.metrics[k] = px.metrics[k]; });
+    return { ok: audit.ok, audit: audit };
+  }
+
+  var renderTimer = null;
+  function scheduleRender() { clearTimeout(renderTimer); renderTimer = setTimeout(render, 90); }
+
+  function render() {
+    if (!S.mesh) return;
+    var r = simulate(octx);
+    S.lastAudit = r.audit;
+    /* On a failed audit the working canvas is reset to the original, so a
+       simulation that did not pass is never on screen. */
+    if (!r.ok) {
+      octx.setTransform(1, 0, 0, 1, 0, 0);
+      octx.clearRect(0, 0, S.work.w, S.work.h);
+      octx.drawImage(S.work.canvas, 0, 0);
+    }
+    paintOverlay();
+    paintPlanSummary();
+    paintQuality();
+  }
+
+  /* --------------------------------------------------- region highlights */
+  var hoverKey = null;
   function pathPolygon(ctx, poly, w, h) {
     ctx.beginPath();
     for (var i = 0; i < poly.length; i++) {
@@ -275,372 +416,85 @@
     ctx.closePath();
   }
 
-  var maskCanvas = document.createElement('canvas');
-  var maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
-
-  /**
-   * Rasterises one region part into a feathered alpha mask, clipped to the
-   * detected face oval so the effect can never spill outside the face.
-   *
-   * The mask depends only on the geometry, never on the chosen strength, so it
-   * is built ONCE per detection and reused for every slider move. The alpha is
-   * stored for the polygon's bounding box only — the pixel loops that consume
-   * it then touch a few hundred thousand pixels instead of the whole image.
-   *
-   * Returns {alpha, bbox, bw} or null if the polygon rasterised to nothing.
-   */
-  function buildMask(part, featherPx) {
-    var w = S.work.w, h = S.work.h;
-
-    /* bbox straight from the polygon, padded for the blur — no full-frame scan */
-    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (var i = 0; i < part.image.length; i++) {
-      var p = part.image[i];
-      if (p.x < x0) x0 = p.x;
-      if (p.x > x1) x1 = p.x;
-      if (p.y < y0) y0 = p.y;
-      if (p.y > y1) y1 = p.y;
-    }
-    var pad = Math.ceil(featherPx * 2.5) + 2;
-    var bx0 = Math.max(0, Math.floor(x0 * w) - pad);
-    var by0 = Math.max(0, Math.floor(y0 * h) - pad);
-    var bx1 = Math.min(w - 1, Math.ceil(x1 * w) + pad);
-    var by1 = Math.min(h - 1, Math.ceil(y1 * h) + pad);
-    var bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
-    if (bw < 2 || bh < 2) return null;
-
-    if (maskCanvas.width !== bw || maskCanvas.height !== bh) {
-      maskCanvas.width = bw; maskCanvas.height = bh;
-    }
-    maskCtx.setTransform(1, 0, 0, 1, 0, 0);
-    maskCtx.clearRect(0, 0, bw, bh);
-    maskCtx.translate(-bx0, -by0);
-
-    maskCtx.save();
-    /* Hard containment: the detected face silhouette is the clip path. */
-    var ovalImage = S.frame.ovalLocal.map(S.frame.toImage);
-    pathPolygon(maskCtx, ovalImage, w, h);
-    maskCtx.clip();
-
-    maskCtx.filter = featherPx > 0.4 ? 'blur(' + featherPx.toFixed(1) + 'px)' : 'none';
-    maskCtx.fillStyle = '#fff';
-    pathPolygon(maskCtx, part.image, w, h);
-    maskCtx.fill();
-    maskCtx.restore();
-
-    /* Optional anatomical cut-off. The forehead uses it so that softening
-       cannot creep down onto the eyebrows, which are high-contrast and would
-       look obviously wrong if blurred. */
-    if (part.clipBelowV != null) {
-      var cut = S.frame.toImage({ u: 0, v: part.clipBelowV });
-      maskCtx.setTransform(1, 0, 0, 1, 0, 0);
-      maskCtx.translate(-bx0, -by0);
-      maskCtx.globalCompositeOperation = 'destination-out';
-      maskCtx.filter = 'blur(' + Math.max(1, featherPx * 0.6).toFixed(1) + 'px)';
-      maskCtx.fillStyle = '#000';
-      maskCtx.fillRect(-w, cut.y * h, w * 3, h * 2);
-      maskCtx.globalCompositeOperation = 'source-over';
-      maskCtx.filter = 'none';
-    }
-
-    var data = maskCtx.getImageData(0, 0, bw, bh).data;
-    /* keep only the alpha channel: a quarter of the memory, simpler indexing */
-    var alpha = new Uint8Array(bw * bh);
-    var any = false;
-    for (var k = 0, n = bw * bh; k < n; k++) {
-      var a = data[(k << 2) + 3];
-      alpha[k] = a;
-      if (a > 2) any = true;
-    }
-    if (!any) return null;
-
-    return { alpha: alpha, bw: bw, bbox: { x0: bx0, y0: by0, x1: bx1, y1: by1 } };
-  }
-
-  /** Builds and caches every active region's mask for the current detection. */
-  function buildAllMasks() {
-    if (!S.frame || !S.regions) return;
-    var w = S.work.w;
-    Object.keys(S.regions).forEach(function (key) {
-      var region = S.regions[key];
-      var featherPx = (region.def.feather || 0.6) * S.frame.scale * w * FEATHER_K;
-      region.parts.forEach(function (part) {
-        part.mask = buildMask(part, featherPx);
-      });
-    });
-  }
-
-  /* =======================================================================
-     5. Deformation
-     ======================================================================= */
-
-  function sample(buf, w, h, x, y, out) {
-    if (x < 0) x = 0; if (y < 0) y = 0;
-    if (x > w - 1) x = w - 1; if (y > h - 1) y = h - 1;
-    var x0 = x | 0, y0 = y | 0;
-    var x1 = x0 + 1 > w - 1 ? w - 1 : x0 + 1;
-    var y1 = y0 + 1 > h - 1 ? h - 1 : y0 + 1;
-    var fx = x - x0, fy = y - y0;
-    var i00 = (y0 * w + x0) << 2, i10 = (y0 * w + x1) << 2;
-    var i01 = (y1 * w + x0) << 2, i11 = (y1 * w + x1) << 2;
-    var w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy);
-    var w01 = (1 - fx) * fy,       w11 = fx * fy;
-    for (var c = 0; c < 3; c++) {
-      out[c] = buf[i00 + c] * w00 + buf[i10 + c] * w10 + buf[i01 + c] * w01 + buf[i11 + c] * w11;
-    }
-  }
-
-  /**
-   * Displacement pass. The mask alpha IS the falloff, so the region's own
-   * detected outline decides where the effect exists and how strongly.
-   */
-  function warpPart(src, dst, mask, part, def, strength) {
-    var w = S.work.w, h = S.work.h;
-    var b = mask.bbox, alpha = mask.alpha, bw = mask.bw;
-    var rgb = [0, 0, 0];
-
-    /* The frame axes were built in "square" space (x scaled by aspect). Square
-       space is a UNIFORM scale of pixel space — x_px = x_sq * h and
-       y_px = y_sq * h — so a unit direction is identical in both, and the axes
-       can be used here as they are. Anisotropy therefore follows the head's
-       own tilt rather than the image axes. */
-    var f = S.frame;
-    var sx = f.scale * w;                 // interocular distance in pixels
-    var ex = f.ex, ey = f.ey;
-
-    var cx = part.centroidImage.x * w, cy = part.centroidImage.y * h;
-    var amp = def.amp * strength;
-    var biasV = def.biasV || 1;
-    var liftPx = (def.lift || 0) * strength * sx;
-    var outSign = part.sign;
-
-    for (var y = b.y0; y <= b.y1; y++) {
-      for (var x = b.x0; x <= b.x1; x++) {
-        var i = (y * w + x) << 2;
-        var wgt = alpha[(y - b.y0) * bw + (x - b.x0)] / 255;
-        if (wgt <= 0.004) continue;
-
-        var sxp = x, syp = y;
-
-        if (def.op === 'expand' || def.op === 'lift') {
-          var dx = x - cx, dy = y - cy;
-          /* decompose onto the head's own axes */
-          var du = dx * ex.x + dy * ex.y;
-          var dv = dx * ey.x + dy * ey.y;
-          var k = 1 - amp * wgt;
-          var ku = k;
-          var kv = 1 - amp * wgt * biasV;
-          du *= ku; dv *= kv;
-          if (def.op === 'lift') dv += liftPx * wgt;   // sample from below => moves up
-          sxp = cx + du * ex.x + dv * ey.x;
-          syp = cy + du * ex.y + dv * ey.y;
-        } else if (def.op === 'define') {
-          var shift = amp * wgt * sx;
-          sxp = x - outSign * shift * ex.x - shift * 0.28 * ey.x;
-          syp = y - outSign * shift * ex.y - shift * 0.28 * ey.y;
-        }
-
-        sample(src, w, h, sxp, syp, rgb);
-        dst[i]     = rgb[0];
-        dst[i + 1] = rgb[1];
-        dst[i + 2] = rgb[2];
-      }
-    }
-  }
-
-  /**
-   * Selective softening for expression areas. Pulls each pixel toward its local
-   * mean in proportion to how far it deviates, weighted by the mask — so lines
-   * soften while pores and edges largely survive.
-   */
-  function softenPart(src, dst, mask, def, strength) {
-    var w = S.work.w, h = S.work.h;
-    var b = mask.bbox, alpha = mask.alpha, bw = mask.bw;
-    var sx = S.frame.scale * w;
-    var rad = Math.max(1, Math.round(sx * 0.035 * (0.5 + strength)));
-
-    for (var y = b.y0; y <= b.y1; y++) {
-      for (var x = b.x0; x <= b.x1; x++) {
-        var i = (y * w + x) << 2;
-        var wgt = alpha[(y - b.y0) * bw + (x - b.x0)] / 255;
-        if (wgt <= 0.004) continue;
-        var a = strength * def.amp * 0.8 * wgt;
-
-        var sr = 0, sg = 0, sb = 0, n = 0;
-        var y0 = y - rad < 0 ? 0 : y - rad, y1 = y + rad > h - 1 ? h - 1 : y + rad;
-        var x0 = x - rad < 0 ? 0 : x - rad, x1 = x + rad > w - 1 ? w - 1 : x + rad;
-        for (var yy = y0; yy <= y1; yy += 2) {
-          for (var xx = x0; xx <= x1; xx += 2) {
-            var j = (yy * w + xx) << 2;
-            sr += src[j]; sg += src[j + 1]; sb += src[j + 2]; n++;
-          }
-        }
-        if (!n) continue;
-        sr /= n; sg /= n; sb /= n;
-        dst[i]     = src[i]     + (sr - src[i])     * a;
-        dst[i + 1] = src[i + 1] + (sg - src[i + 1]) * a;
-        dst[i + 2] = src[i + 2] + (sb - src[i + 2]) * a;
-      }
-    }
-  }
-
-  /* --------------------------------------------------------------- rendering */
-
-  function effectiveStrength() {
-    if (!S.volumeMode) return S.intensity;
-    /* ml -> simulation intensity. Illustration only: deliberately sub-linear
-       so a bigger number does not read as a proportionally bigger promise. */
-    return Math.min(1, Math.pow(S.volumeMl / 4, 0.8));
-  }
-
-  var renderTimer = null;
-  function scheduleRender() {
-    if (renderTimer) clearTimeout(renderTimer);
-    renderTimer = setTimeout(render, 70);
-  }
-
-  function render() {
-    if (!S.base || !S.frame) return;
-    var w = S.work.w, h = S.work.h;
-    var strength = effectiveStrength();
-
-    var a = new Uint8ClampedArray(S.base.data);
-    var b = new Uint8ClampedArray(S.base.data);
-
-    var order = window.AmiraFaceRegions.CATALOGUE.filter(function (d) {
-      return S.active.indexOf(d.key) > -1;
-    });
-
-    order.forEach(function (def) {
-      var region = S.regions[def.key];
-      if (!region) return;
-      region.parts.forEach(function (part) {
-        if (!part.mask) return;               // masks are cached per detection
-        b.set(a);
-        if (def.op === 'smooth') softenPart(a, b, part.mask, def, strength);
-        else warpPart(a, b, part.mask, part, def, strength);
-        a.set(b);
-      });
-    });
-
-    var out = new ImageData(a, w, h);
-    octx.putImageData(out, 0, 0);
-    bctx.putImageData(S.base, 0, 0);
-    fctx.putImageData(out, 0, 0);
-    paintOverlay();
-    paintApplied();
-  }
-
-  /* ------------------------------------------------- region highlight overlay */
-
   function paintOverlay() {
     if (!overlay || !S.frame) return;
-    var w = S.work.w, h = S.work.h;
-    vctx.setTransform(overlay.width / w, 0, 0, overlay.height / h, 0, 0);
-    vctx.clearRect(0, 0, w, h);
+    var W = S.work.w, H = S.work.h;
+    vctx.setTransform(overlay.width / W, 0, 0, overlay.height / H, 0, 0);
+    vctx.clearRect(0, 0, W, H);
+    var iod = S.frame.scale * W;
 
-    var iod = S.frame.scale * w;
-
+    /* Shown only while choosing. The result view carries no overlay at all, so
+       the only line over the face there is the comparison handle. */
     window.AmiraFaceRegions.CATALOGUE.forEach(function (def) {
       var region = S.regions[def.key];
       if (!region) return;
       var on = S.active.indexOf(def.key) > -1;
-      var hot = def.key === hoverKey;
-      if (!on && !hot) return;
-
+      if (!on && def.key !== hoverKey) return;
       region.parts.forEach(function (part) {
-        pathPolygon(vctx, part.image, w, h);
-        vctx.fillStyle = on ? 'rgba(220,228,222,0.30)' : 'rgba(220,228,222,0.16)';
+        pathPolygon(vctx, part.image, W, H);
+        vctx.fillStyle = on ? 'rgba(220,228,222,0.26)' : 'rgba(220,228,222,0.14)';
         vctx.fill();
-        vctx.lineWidth = Math.max(1, iod * (on ? 0.018 : 0.012));
-        vctx.strokeStyle = on ? 'rgba(73,58,67,0.62)' : 'rgba(73,58,67,0.34)';
+        vctx.lineWidth = Math.max(1, iod * (on ? 0.014 : 0.010));
+        vctx.strokeStyle = on ? 'rgba(73,58,67,0.50)' : 'rgba(73,58,67,0.28)';
         vctx.setLineDash(on ? [] : [iod * 0.06, iod * 0.05]);
         vctx.stroke();
         vctx.setLineDash([]);
       });
     });
-
     if (DEBUG) paintDebug();
   }
 
-  /* ------------------------------------------------------------ debug layer */
-
   function paintDebug() {
-    var w = S.work.w, h = S.work.h, f = S.frame;
-    var iod = f.scale * w;
-
-    /* all 478 landmarks */
-    vctx.fillStyle = 'rgba(255,255,255,0.75)';
+    var W = S.work.w, H = S.work.h, f = S.frame, iod = f.scale * W;
+    vctx.fillStyle = 'rgba(255,255,255,0.7)';
     for (var i = 0; i < S.landmarks.length; i++) {
       var p = S.landmarks[i];
-      vctx.fillRect(p.x * w - 0.6, p.y * h - 0.6, 1.4, 1.4);
+      vctx.fillRect(p.x * W - 0.6, p.y * H - 0.6, 1.4, 1.4);
     }
-
+    vctx.strokeStyle = 'rgba(0,255,255,0.16)';
+    vctx.lineWidth = Math.max(0.4, iod * 0.002);
+    S.mesh.tris.forEach(function (t) {
+      var a = S.mesh.verts[t[0]], b = S.mesh.verts[t[1]], c = S.mesh.verts[t[2]];
+      vctx.beginPath(); vctx.moveTo(a.x, a.y); vctx.lineTo(b.x, b.y); vctx.lineTo(c.x, c.y);
+      vctx.closePath(); vctx.stroke();
+    });
     var box = window.AmiraFaceMesh.bboxOf(S.landmarks);
     vctx.strokeStyle = 'rgba(255,0,80,0.8)';
     vctx.lineWidth = Math.max(1, iod * 0.008);
-    vctx.strokeRect(box.x0 * w, box.y0 * h, box.w * w, box.h * h);
-
-    function line(a, b, color) {
+    vctx.strokeRect(box.x0 * W, box.y0 * H, box.w * W, box.h * H);
+    function line(a, b, col) {
       var p = f.toImage(a), q = f.toImage(b);
-      vctx.strokeStyle = color;
-      vctx.beginPath();
-      vctx.moveTo(p.x * w, p.y * h);
-      vctx.lineTo(q.x * w, q.y * h);
-      vctx.stroke();
+      vctx.strokeStyle = col; vctx.beginPath();
+      vctx.moveTo(p.x * W, p.y * H); vctx.lineTo(q.x * W, q.y * H); vctx.stroke();
     }
     var A = f.anchors;
-    line({ u: 0, v: A.vTop }, { u: 0, v: A.vChin }, 'rgba(0,180,255,0.85)');       // centre line
-    line({ u: -1.2, v: 0 }, { u: 1.2, v: 0 }, 'rgba(0,255,140,0.85)');            // eye line
-    line({ u: -1.0, v: A.vMouth }, { u: 1.0, v: A.vMouth }, 'rgba(255,210,0,0.8)'); // mouth line
-    line({ u: -1.0, v: A.vNose }, { u: 1.0, v: A.vNose }, 'rgba(255,120,0,0.8)');  // nose line
-
-    /* contours */
-    function contour(list, color) {
-      vctx.strokeStyle = color;
-      vctx.beginPath();
-      list.forEach(function (l, n) {
-        var q = f.toImage(l);
-        if (n === 0) vctx.moveTo(q.x * w, q.y * h); else vctx.lineTo(q.x * w, q.y * h);
-      });
-      vctx.closePath(); vctx.stroke();
-    }
-    contour(f.ovalLocal, 'rgba(255,255,255,0.9)');
-    contour(f.lipsLocal, 'rgba(255,0,200,0.9)');
-
-    /* every region polygon, whether selected or not */
-    Object.keys(S.regions).forEach(function (k) {
-      S.regions[k].parts.forEach(function (part) {
-        pathPolygon(vctx, part.image, w, h);
-        vctx.strokeStyle = 'rgba(0,255,255,0.55)';
-        vctx.lineWidth = Math.max(1, iod * 0.006);
-        vctx.stroke();
-      });
-    });
+    line({ u: 0, v: A.vTop }, { u: 0, v: A.vChin }, 'rgba(0,180,255,0.85)');
+    line({ u: -1.2, v: 0 }, { u: 1.2, v: 0 }, 'rgba(0,255,140,0.85)');
+    line({ u: -1, v: A.vMouth }, { u: 1, v: A.vMouth }, 'rgba(255,210,0,0.8)');
+    line({ u: -1, v: A.vNose }, { u: 1, v: A.vNose }, 'rgba(255,120,0,0.8)');
 
     var dbg = $('#debugReadout');
     if (dbg) {
       dbg.hidden = false;
       dbg.textContent = JSON.stringify({
-        work: S.work.w + 'x' + S.work.h,
-        metrics: S.gate && S.gate.metrics,
-        anchors: Object.keys(A).reduce(function (o, k) {
-          var v = A[k];
-          o[k] = (typeof v === 'number') ? +v.toFixed(3) : v;
-          return o;
-        }, {})
+        work: W + 'x' + H, triangles: S.mesh.tris.length,
+        gate: S.gate && S.gate.metrics, calibration: S.calib,
+        plan: buildPlan(),
+        audit: S.lastAudit && {
+          ok: S.lastAudit.ok, metrics: S.lastAudit.metrics,
+          problems: (S.lastAudit.problems || []).map(function (p) { return p.code; })
+        }
       }, null, 1);
     }
   }
 
   /* =======================================================================
-     6. Region selection UI
+     Region / amount / product controls
      ======================================================================= */
-  var hoverKey = null;
-
   function buildRegionList() {
     if (!regionList) return;
     regionList.innerHTML = window.AmiraFaceRegions.CATALOGUE.map(function (r) {
+      var isVol = r.op === 'volume';
       return '<li>' +
         '<button type="button" class="region-toggle" data-region="' + r.key + '" aria-pressed="false">' +
           '<span class="region-toggle__dot" aria-hidden="true"></span>' +
@@ -648,10 +502,17 @@
             '<span class="region-toggle__en">' + r.en + '</span>' +
             '<span class="region-toggle__he">' + r.he + '</span>' +
           '</span>' +
-          '<span class="region-toggle__kind">' +
-            (r.kind === 'botox' ? 'ריכוך קמטים' : 'נפח / מילוי') +
-          '</span>' +
-        '</button></li>';
+          '<span class="region-toggle__kind">' + (isVol ? 'נפח / מילוי' : 'ריכוך קמטים') + '</span>' +
+        '</button>' +
+        (isVol
+          ? '<div class="amount" data-amount-for="' + r.key + '" hidden>' +
+              '<label for="amt-' + r.key + '"><span>Amount</span>' +
+              '<output data-amount-out="' + r.key + '">0.5 ml</output></label>' +
+              '<input type="range" id="amt-' + r.key + '" data-amount-range="' + r.key +
+                '" min="' + ML_MIN + '" max="' + ML_MAX + '" step="' + ML_STEP + '" value="0.5">' +
+            '</div>'
+          : '') +
+        '</li>';
     }).join('');
 
     $$('.region-toggle', regionList).forEach(function (b) {
@@ -661,95 +522,178 @@
       b.addEventListener('focus', function () { hoverKey = b.dataset.region; paintOverlay(); });
       b.addEventListener('blur', function () { hoverKey = null; paintOverlay(); });
     });
-  }
-
-  function defOf(key) {
-    var list = window.AmiraFaceRegions.CATALOGUE;
-    for (var i = 0; i < list.length; i++) if (list[i].key === key) return list[i];
-    return null;
+    $$('[data-amount-range]', regionList).forEach(function (r) {
+      r.addEventListener('input', function () {
+        var key = r.dataset.amountRange;
+        S.amounts[key] = parseFloat(r.value);
+        var out = $('[data-amount-out="' + key + '"]', regionList);
+        if (out) out.textContent = S.amounts[key].toFixed(1) + ' ml';
+        scheduleRender();
+      });
+    });
   }
 
   function toggle(key) {
     var i = S.active.indexOf(key);
-    if (i > -1) S.active.splice(i, 1); else S.active.push(key);
-    syncToggles();
+    if (i > -1) S.active.splice(i, 1);
+    else {
+      S.active.push(key);
+      if (S.amounts[key] == null) S.amounts[key] = 0.5;
+    }
+    syncControls();
     scheduleRender();
   }
 
-  function syncToggles() {
+  function syncControls() {
     $$('[data-region]').forEach(function (el) {
       el.setAttribute('aria-pressed', S.active.indexOf(el.dataset.region) > -1 ? 'true' : 'false');
     });
-    var anyVolume = S.active.some(function (k) { var d = defOf(k); return d && d.volume; });
-    var vw = $('#volumeWrap');
-    if (vw) vw.hidden = !anyVolume;
-    if (!anyVolume && S.volumeMode) { S.volumeMode = false; syncVolumeMode(); }
-
+    $$('[data-amount-for]').forEach(function (box) {
+      box.hidden = S.active.indexOf(box.dataset.amountFor) < 0;
+    });
+    var anyVolume = S.active.some(function (k) { var d = defOf(k); return d && d.op === 'volume'; });
+    var ps = $('#productStep');
+    if (ps) ps.hidden = !anyVolume;
     var gen = $('#toResult');
     if (gen) gen.disabled = S.active.length === 0;
     var hint = $('#exploreHint');
     if (hint) hint.hidden = S.active.length > 0;
   }
 
-  function paintApplied() {
+  function paintPlanSummary() {
     var list = $('#appliedList');
     if (!list) return;
-    var label = S.volumeMode
-      ? S.volumeMl + ' ml (תרחיש המחשה)'
-      : intensityLabel(S.intensity);
-    list.innerHTML = S.active.map(function (k) {
+    var rows = S.active.map(function (k) {
       var d = defOf(k);
       if (!d) return '';
-      return '<li><span>' + d.he + '</span><span>' +
-        (d.volume ? label : intensityLabel(S.intensity)) + '</span></li>';
-    }).join('') || '<li><span class="muted">לא נבחרו אזורים</span><span></span></li>';
+      var right = d.op === 'volume'
+        ? (S.amounts[k] || 0.5).toFixed(1) + ' ml'
+        : LEVELS[S.level].he;
+      return '<li><span>' + d.he + '</span><span>' + right + '</span></li>';
+    }).join('');
+    var prod = S.product !== NEUTRAL
+      ? '<li><span>מוצר</span><span>' + S.product.brand + ' ' + S.product.name + '</span></li>' : '';
+    var lvl = '<li><span>רמת הצגה</span><span>' + LEVELS[S.level].label + '</span></li>';
+    list.innerHTML = (rows || '<li><span class="muted">לא נבחרו אזורים</span><span></span></li>') + prod + lvl;
   }
 
-  function intensityLabel(v) {
-    if (v < 0.28) return 'עדין';
-    if (v < 0.6) return 'בינוני';
-    return 'מודגש';
+  /* ---------------------------------------------------- simulation quality */
+  function grade(v, good, ok) {
+    if (v == null) return { t: '—', c: 'na' };
+    if (v >= good) return { t: 'Excellent', c: 'good' };
+    if (v >= ok) return { t: 'Good', c: 'ok' };
+    return { t: 'Limited', c: 'low' };
   }
 
-  /* ------------------------------------------------------------- controls */
-  var intensityRange = $('#intensityRange');
-  if (intensityRange) {
-    intensityRange.addEventListener('input', function () {
-      S.intensity = parseInt(intensityRange.value, 10) / 100;
-      var out = $('#intensityOut');
-      if (out) out.textContent = intensityLabel(S.intensity);
-      scheduleRender();
+  function paintQuality() {
+    var boxes = $$('#qualityPanel, #qualityPanelResult');
+    if (!boxes.length || !S.gate) return;
+    var m = S.gate.metrics, c = S.calib || {};
+    var rows = [
+      ['Face mapping', grade(m.landmarkCount === 478 ? 1 : 0.4, 0.9, 0.6)],
+      ['Camera angle', grade(1 - Math.min(1, Math.max(Math.abs(m.rollDeg || 0) / 14,
+                        (m.offAxisDeg || 0) / 20)), 0.6, 0.3)],
+      ['Image detail', grade(Math.min(1, (m.interocularPx || 0) / 140), 0.75, 0.45)],
+      ['Facial symmetry', grade(c.symmetry, 0.93, 0.86)]
+    ];
+    var auditOk = !S.lastAudit || S.lastAudit.ok;
+    var html = rows.map(function (r) {
+      return '<li><span>' + r[0] + '</span><span class="q q--' + r[1].c + '">' + r[1].t + '</span></li>';
+    }).join('') +
+      '<li><span>Simulation checks</span><span class="q q--' + (auditOk ? 'good' : 'low') + '">' +
+      (auditOk ? 'Passed' : 'Failed') + '</span></li>';
+    boxes.forEach(function (b) { b.innerHTML = html; });
+  }
+
+  /* ------------------------------------------------------------- product UI */
+  function buildProductStep() {
+    var wrap = $('#productChoices');
+    if (!wrap) return;
+    if (!PRODUCTS_READY) {
+      wrap.innerHTML =
+        '<div class="notice">' +
+          '<span class="notice__title">בחירת מוצר אינה פעילה בגרסה הזו</span>' +
+          'הדמיה שמשתנה לפי מוצר מסחרי מסוים מחייבת נתוני יצרן (IFU) לכל מוצר, ' +
+          'ובדיקה רגולטורית של הצגת מוצרי מרשם לקהל. הארכיטקטורה מוכנה והטבלה ' +
+          'ריקה בכוונה — לא המצאנו מקדמים. עד אז ההדמיה פועלת בפרופיל נייטרלי.' +
+        '</div>';
+      return;
+    }
+    wrap.innerHTML = [NEUTRAL].concat(BRANDED).map(function (p, i) {
+      return '<label class="option">' +
+        '<input type="radio" name="product" value="' + p.id + '"' + (i === 0 ? ' checked' : '') + '>' +
+        '<span class="option__box"><span>' + (p.brand ? p.brand + ' ' : '') + p.name + '</span>' +
+        '<small>' + (p.family || '') + '</small></span></label>';
+    }).join('');
+    $$('input[name="product"]', wrap).forEach(function (r) {
+      r.addEventListener('change', function () {
+        var all = [NEUTRAL].concat(BRANDED);
+        for (var i = 0; i < all.length; i++) if (all[i].id === r.value) S.product = all[i];
+        scheduleRender();
+      });
     });
   }
 
-  var volumeToggle = $('#volumeToggle');
-  var volumeRange = $('#volumeRange');
-  function syncVolumeMode() {
-    var box = $('#volumeControls');
-    if (box) box.hidden = !S.volumeMode;
-    if (volumeToggle) volumeToggle.setAttribute('aria-pressed', String(S.volumeMode));
-    var pri = $('#intensityControls');
-    if (pri) pri.classList.toggle('is-secondary', S.volumeMode);
-  }
-  if (volumeToggle) {
-    volumeToggle.addEventListener('click', function () {
-      S.volumeMode = !S.volumeMode;
-      syncVolumeMode();
-      scheduleRender();
+  $$('input[name="previewLevel"]').forEach(function (r) {
+    r.addEventListener('change', function () { S.level = r.value; scheduleRender(); });
+  });
+
+  /* =======================================================================
+     Compare amounts
+     ======================================================================= */
+  function buildCompare() {
+    var strip = $('#compareStrip');
+    if (!strip || !S.mesh) return;
+    var hasVolume = S.active.some(function (k) { var d = defOf(k); return d && d.op === 'volume'; });
+    if (!hasVolume) { strip.innerHTML = ''; strip.hidden = true; return; }
+    strip.hidden = false;
+
+    var options = [0.5, 1.0, 1.5];
+    strip.innerHTML = options.map(function (ml) {
+      return '<button type="button" class="cmp-amt" data-ml="' + ml + '">' +
+        '<canvas data-cmp="' + ml + '"></canvas><span>' + ml.toFixed(1) + ' ml</span></button>';
+    }).join('');
+
+    var W = S.work.w, H = S.work.h;
+    var tw = 190, th = Math.round(tw * H / W);
+    var scratch = document.createElement('canvas');
+    scratch.width = W; scratch.height = H;
+    var sctx = scratch.getContext('2d', { willReadFrequently: true });
+
+    options.forEach(function (ml) {
+      var target = $('[data-cmp="' + ml + '"]', strip);
+      target.width = tw; target.height = th;
+      var r = simulate(sctx, { ml: ml });
+      var tctx = target.getContext('2d');
+      if (r.ok) tctx.drawImage(scratch, 0, 0, tw, th);
+      else {
+        tctx.drawImage(S.work.canvas, 0, 0, tw, th);
+        target.parentNode.classList.add('is-rejected');
+      }
     });
-  }
-  if (volumeRange) {
-    volumeRange.max = String(VOLUMES.length - 1);
-    volumeRange.addEventListener('input', function () {
-      S.volumeMl = VOLUMES[parseInt(volumeRange.value, 10)] || 0;
-      var out = $('#volumeOut');
-      if (out) out.textContent = S.volumeMl + ' ml';
-      scheduleRender();
+
+    $$('.cmp-amt', strip).forEach(function (b) {
+      b.addEventListener('click', function () {
+        var ml = parseFloat(b.dataset.ml);
+        S.active.forEach(function (k) {
+          var d = defOf(k);
+          if (d && d.op === 'volume') S.amounts[k] = ml;
+        });
+        $$('[data-amount-range]').forEach(function (r) {
+          var key = r.dataset.amountRange;
+          if (S.amounts[key] != null) {
+            r.value = String(S.amounts[key]);
+            var o = $('[data-amount-out="' + key + '"]');
+            if (o) o.textContent = S.amounts[key].toFixed(1) + ' ml';
+          }
+        });
+        runPreview();
+      });
     });
   }
 
   /* =======================================================================
-     7. Upload path
+     Upload / camera
      ======================================================================= */
   var fileInput = $('#mirrorFile');
   var drop = $('#mirrorDrop');
@@ -758,20 +702,17 @@
     if (!file) return;
     if (!/^image\//.test(file.type)) { alert('נא לבחור קובץ תמונה (JPG או PNG).'); return; }
     if (file.size > 25 * 1024 * 1024) { alert('הקובץ גדול מדי. נא לבחור תמונה עד 25MB.'); return; }
-
     var url = URL.createObjectURL(file);
     var img = new Image();
     img.onload = function () {
       URL.revokeObjectURL(url);
+      /* A stored file is used as decoded: browsers already apply EXIF
+         orientation, and an upload is not a mirrored preview. */
       startAnalysis(img, img.naturalWidth, img.naturalHeight, false);
     };
-    img.onerror = function () {
-      URL.revokeObjectURL(url);
-      alert('לא הצלחנו לקרוא את התמונה. נסי קובץ אחר.');
-    };
+    img.onerror = function () { URL.revokeObjectURL(url); alert('לא הצלחנו לקרוא את התמונה.'); };
     img.src = url;
   }
-
   if (fileInput) fileInput.addEventListener('change', function () { handleFile(fileInput.files[0]); });
   if (drop) {
     ['dragenter', 'dragover'].forEach(function (t) {
@@ -785,16 +726,13 @@
     });
   }
 
-  /* =======================================================================
-     8. Analysis entry point
-     ======================================================================= */
   function startAnalysis(source, sw, sh, mirror) {
     go('analyze');
     var status = $('#analyzeStatus');
     setStatus(status, 'מכינה את התמונה…');
 
     ensureEngine(status).then(function () {
-      setStatus(status, 'מזהה את מבנה הפנים…');
+      setStatus(status, 'מזהה את מבנה הפנים ובונה מודל תלת־ממדי…');
       S.work = makeWork(source, sw, sh, mirror);
       sizeExact(outCanvas, S.work.w, S.work.h);
       sizeCrisp(overlay, S.work.w, S.work.h);
@@ -803,33 +741,48 @@
       var cmp = $('#resultCompare');
       if (cmp) cmp.style.aspectRatio = S.work.w + ' / ' + S.work.h;
       if (faceStage) faceStage.style.aspectRatio = S.work.w + ' / ' + S.work.h;
-
       S.base = S.work.ctx.getImageData(0, 0, S.work.w, S.work.h);
-
-      return new Promise(function (resolve) {
-        setTimeout(function () { resolve(analyse()); }, 30);
-      });
+      S.baseData = S.base.data;
+      return new Promise(function (res) { setTimeout(function () { res(analyse()); }, 30); });
     }).then(function (gate) {
       S.gate = gate;
-      if (!gate.ok) { showRejection(gate); return; }
-      S.active = [];
-      buildAllMasks();     // once per detection; slider moves reuse them
-      syncToggles();
+      if (!gate.ok) { showRejection(gate.problems, gate.metrics); return; }
+      S.active = []; S.amounts = {}; S.lastAudit = null;
+      paintCalibration();
+      syncControls();
       render();
       go('explore');
     }).catch(function (err) {
-      var code = err && err.code;
-      var list = $('#rejectList');
-      if (list) list.innerHTML = '<li>' + (ENGINE_ERRORS[code] || ENGINE_ERRORS.engine_error) + '</li>';
-      var dbg = $('#rejectDebug');
-      if (dbg) { dbg.hidden = !DEBUG; if (DEBUG) dbg.textContent = String(err && err.message || err); }
       go('reject');
+      var list = $('#rejectList');
+      if (list) list.innerHTML = '<li>' +
+        (ENGINE_ERRORS[err && err.code] || ENGINE_ERRORS.engine_error) + '</li>';
+      var dbg = $('#rejectDebug');
+      if (dbg) { dbg.hidden = !DEBUG; if (DEBUG) dbg.textContent = String(err && (err.message || err.code)); }
     });
   }
 
-  /* =======================================================================
-     9. Camera with live guidance
-     ======================================================================= */
+  function paintCalibration() {
+    var box = $('#calibList');
+    if (!box || !S.calib) return;
+    var c = S.calib;
+    var rows = [
+      ['Interpupillary distance', c.interocularPx + ' px'],
+      ['Facial width', c.faceWidth != null ? c.faceWidth + ' mm*' : '—'],
+      ['Facial height', c.faceHeight + ' mm*'],
+      ['Lip width', c.lipWidth + ' mm*'],
+      ['Lip height', c.lipHeight + ' mm*'],
+      ['Chin projection', c.chinProjection + ' mm*'],
+      ['Facial symmetry', c.symmetry != null ? (c.symmetry * 100).toFixed(1) + '%' : '—'],
+      ['Head pose', 'roll ' + (c.rollDeg != null ? c.rollDeg : '—') + '° · off-axis ' +
+        (c.offAxisDeg != null ? c.offAxisDeg : '—') + '°']
+    ];
+    box.innerHTML = rows.map(function (r) {
+      return '<li><span>' + r[0] + '</span><span>' + r[1] + '</span></li>';
+    }).join('');
+  }
+
+  /* ------------------------------------------------------------- camera */
   var camVideo = $('#camVideo');
   var camOverlay = $('#camOverlay');
   var camCtx = camOverlay ? camOverlay.getContext('2d') : null;
@@ -837,23 +790,17 @@
   var camCapCtx = camCapture.getContext('2d', { willReadFrequently: true });
 
   var HINTS = {
-    none:      'מחפשת פנים…',
-    many:      'יש יותר מאדם אחד בתמונה',
-    closer:    'להתקרב מעט',
-    back:      'להתרחק מעט',
-    left:      'להזיז את הראש קצת שמאלה ←',
-    right:     'להזיז את הראש קצת ימינה →',
-    straight:  'להביט ישר למצלמה',
-    level:     'ליישר את הראש',
-    centre:    'למרכז את הפנים במסגרת',
-    ready:     'מושלם ✓'
+    none: 'מחפשת פנים…', many: 'יש יותר מאדם אחד בתמונה',
+    closer: 'להתקרב מעט', back: 'להתרחק מעט',
+    left: 'למרכז את הפנים ←', right: 'למרכז את הפנים →',
+    straight: 'להביט ישר למצלמה', level: 'ליישר את הראש',
+    centre: 'למרכז את הפנים במסגרת', ready: 'מושלם ✓'
   };
 
   function openCamera() {
     var status = $('#camStatus');
     setStatus(status, 'מבקשת הרשאה למצלמה…');
     go('camera');
-
     ensureEngine(status)
       .then(function () { return window.AmiraFaceMesh.loadVideo(); })
       .then(function () {
@@ -871,8 +818,7 @@
         camLoop();
       })
       .catch(function (err) {
-        var code = err && err.code;
-        setStatus(status, ENGINE_ERRORS[code] ||
+        setStatus(status, ENGINE_ERRORS[err && err.code] ||
           'לא הצלחנו לפתוח את המצלמה. אפשר להעלות תמונה מהגלריה במקום.');
       });
   }
@@ -880,22 +826,18 @@
   function stopCamera() {
     if (S.rafId) cancelAnimationFrame(S.rafId);
     S.rafId = 0;
-    if (S.stream) {
-      S.stream.getTracks().forEach(function (t) { t.stop(); });
-      S.stream = null;
-    }
+    if (S.stream) { S.stream.getTracks().forEach(function (t) { t.stop(); }); S.stream = null; }
     if (camVideo) camVideo.srcObject = null;
   }
 
   function camLoop() {
     S.rafId = requestAnimationFrame(camLoop);
     if (!camVideo || camVideo.readyState < 2) return;
-
     var vw = camVideo.videoWidth, vh = camVideo.videoHeight;
     if (!vw || !vh) return;
 
     /* Mirror here, once. The captured pixels are what gets analysed, so the
-       overlay, the guidance and the final photo all share one geometry. */
+       preview, the guidance and the stored photo share one geometry. */
     var scale = Math.min(1, 640 / Math.max(vw, vh));
     var cw = Math.round(vw * scale), ch = Math.round(vh * scale);
     if (camCapture.width !== cw) { camCapture.width = cw; camCapture.height = ch; }
@@ -917,17 +859,16 @@
       var frame = window.AmiraFaceRegions.buildFrame(pts, S.sets, cw / ch);
       window.AmiraFaceMesh.assessFrame(frame, { w: cw, h: ch }, gate.problems, gate.metrics);
       gate.ok = gate.problems.length === 0;
+      var by = {};
+      gate.problems.forEach(function (p) { by[p.code] = p; });
 
-      var byCode = {};
-      gate.problems.forEach(function (p) { byCode[p.code] = p; });
-
-      if (byCode.cropped) hint = HINTS.back;
-      else if (byCode.too_small || byCode.low_detail) hint = HINTS.closer;
-      else if (byCode.roll) hint = HINTS.level;
-      /* Rotation gets "look straight", never a left/right arrow: the preview
-         is mirrored, so a rotation arrow is genuinely ambiguous to the viewer.
-         Arrows are reserved for POSITION, where a mirrored view is intuitive. */
-      else if (byCode.turned || byCode.off_axis) hint = HINTS.straight;
+      if (by.cropped) hint = HINTS.back;
+      else if (by.too_small || by.low_detail) hint = HINTS.closer;
+      else if (by.roll) hint = HINTS.level;
+      /* Rotation gets "look straight", never a left/right arrow: the preview is
+         mirrored, so a rotation arrow is ambiguous. Arrows are for POSITION,
+         where a mirrored view is intuitive. */
+      else if (by.turned || by.off_axis) hint = HINTS.straight;
       else if (gate.ok) {
         var box = window.AmiraFaceMesh.bboxOf(pts);
         var cxn = (box.x0 + box.x1) / 2, cyn = (box.y0 + box.y1) / 2;
@@ -938,8 +879,7 @@
     }
 
     S.camReady = ok ? S.camReady + 1 : 0;
-    var stable = S.camReady >= 5;      // ~5 frames, so it cannot flicker green
-
+    var stable = S.camReady >= 5;
     var hintEl = $('#camHint');
     if (hintEl) {
       hintEl.textContent = stable ? HINTS.ready : hint;
@@ -947,7 +887,6 @@
     }
     var shutter = $('#camShutter');
     if (shutter) shutter.disabled = !stable;
-
     drawCamOverlay(cw, ch, pts, stable);
   }
 
@@ -956,9 +895,6 @@
     if (camOverlay.width !== cw) { camOverlay.width = cw; camOverlay.height = ch; }
     camOverlay.style.aspectRatio = cw + ' / ' + ch;
     camCtx.clearRect(0, 0, cw, ch);
-
-    /* Target frame the visitor should fill. Guidance only — it is never used
-       to position anything, unlike the old fixed oval. */
     camCtx.strokeStyle = ready ? 'rgba(120,200,150,0.95)' : 'rgba(255,255,255,0.75)';
     camCtx.lineWidth = Math.max(2, cw * 0.006);
     camCtx.setLineDash([cw * 0.03, cw * 0.025]);
@@ -966,7 +902,6 @@
     camCtx.ellipse(cw * 0.5, ch * 0.47, cw * 0.30, ch * 0.38, 0, 0, Math.PI * 2);
     camCtx.stroke();
     camCtx.setLineDash([]);
-
     if (pts) {
       camCtx.fillStyle = ready ? 'rgba(120,200,150,0.85)' : 'rgba(255,255,255,0.5)';
       for (var i = 0; i < pts.length; i += 3) {
@@ -982,7 +917,6 @@
   }
   var camCancel = $('#camCancel');
   if (camCancel) camCancel.addEventListener('click', function () { stopCamera(); go('start'); });
-
   var camShutter = $('#camShutter');
   if (camShutter) {
     camShutter.addEventListener('click', function () {
@@ -991,15 +925,15 @@
       var full = document.createElement('canvas');
       full.width = vw; full.height = vh;
       var fx = full.getContext('2d');
-      fx.translate(vw, 0); fx.scale(-1, 1);          // same mirroring as the loop
+      fx.translate(vw, 0); fx.scale(-1, 1);       // same mirroring as the loop
       fx.drawImage(camVideo, 0, 0, vw, vh);
       stopCamera();
-      startAnalysis(full, vw, vh, false);            // already mirrored
+      startAnalysis(full, vw, vh, false);         // already mirrored
     });
   }
 
   /* =======================================================================
-     10. Consent gate -> preview
+     Consent -> preview
      ======================================================================= */
   var toResult = $('#toResult');
   if (toResult) {
@@ -1009,7 +943,6 @@
       if (window.AmiraSheet) window.AmiraSheet.open(consentSheet);
     });
   }
-
   var consentCheck = $('#consentCheck');
   var consentGo = $('#consentGo');
   if (consentCheck && consentGo) {
@@ -1019,9 +952,6 @@
       if (window.AmiraSheet) window.AmiraSheet.close(consentSheet);
       runPreview();
     });
-
-    /* Cancelling clears the tick. Re-opening the gate then asks again instead
-       of arriving pre-accepted from an attempt the visitor backed out of. */
     var clearConsent = function () {
       if (S.consented) return;
       consentCheck.checked = false;
@@ -1029,20 +959,37 @@
     };
     $$('.sheet__scrim, .sheet__close, [data-sheet-close]', consentSheet)
       .forEach(function (el) { el.addEventListener('click', clearConsent); });
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') clearConsent();
-    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') clearConsent(); });
   }
 
   function runPreview() {
     go('result');
-    var wait = $('#resultWait'), view = $('#resultView');
+    var wait = $('#resultWait'), view = $('#resultView'), fail = $('#resultFail');
     if (wait) wait.hidden = false;
     if (view) view.hidden = true;
+    if (fail) fail.hidden = true;
+
     setTimeout(function () {
-      render();
+      var r = simulate(fctx);
+      S.lastAudit = r.audit;
       if (wait) wait.hidden = true;
+
+      if (!r.ok) {
+        if (fail) {
+          fail.hidden = false;
+          listProblems($('#resultFailList'), r.audit.problems);
+          var dbg = $('#resultFailDebug');
+          if (dbg) { dbg.hidden = !DEBUG; if (DEBUG) dbg.textContent = JSON.stringify(r.audit.metrics, null, 1); }
+        }
+        paintQuality();
+        return;
+      }
+
+      bctx.putImageData(S.base, 0, 0);
       if (view) view.hidden = false;
+      paintPlanSummary();
+      paintQuality();
+      buildCompare();
       var cmp = $('#resultCompare');
       if (cmp && window.AmiraSite) window.AmiraSite.bindCompare(cmp);
     }, 40);
@@ -1054,28 +1001,22 @@
       go(b.dataset.goto);
     });
   });
-
   var rejectRetry = $('#rejectRetry');
   if (rejectRetry) rejectRetry.addEventListener('click', function () { reset(); });
 
   /* =======================================================================
-     11. Download / hand-off / reset
+     Download / hand-off / reset
      ======================================================================= */
   var dl = $('#mirrorDownload');
   if (dl) {
     dl.addEventListener('click', function () {
-      var w = S.work.w, h = S.work.h;
-      var pad = 28, capH = 150;
+      var w = S.work.w, h = S.work.h, pad = 28, capH = 152;
       var c = document.createElement('canvas');
-      c.width = w * 2 + pad * 3;
-      c.height = h + pad * 2 + capH;
+      c.width = w * 2 + pad * 3; c.height = h + pad * 2 + capH;
       var x = c.getContext('2d');
-
-      x.fillStyle = '#F7F5F2';
-      x.fillRect(0, 0, c.width, c.height);
+      x.fillStyle = '#F7F5F2'; x.fillRect(0, 0, c.width, c.height);
       x.drawImage(cmpBefore, pad, pad, w, h);
       x.drawImage(cmpAfter, pad * 2 + w, pad, w, h);
-
       [['ORIGINAL', pad + 14], ['AI VISUAL SIMULATION', pad * 2 + w + 14]].forEach(function (t) {
         x.font = '500 22px Georgia, serif';
         var tw = x.measureText(t[0]).width + 26;
@@ -1086,31 +1027,26 @@
         x.fillStyle = '#fff';
         x.fillText(t[0], t[1] + 13, pad + 41);
       });
-
       var y = h + pad * 2 + 16;
       x.fillStyle = '#493A43';
       x.font = '500 26px Georgia, serif';
-      x.fillText('Dr. Amira Dabbagha · Medical Aesthetics', pad, y);
+      x.fillText('AMEERA DABAJA · Medical Aesthetics', pad, y);
       x.fillStyle = '#645954';
       x.font = '19px Arial, sans-serif';
-      x.direction = 'rtl';
-      x.textAlign = 'right';
+      x.direction = 'rtl'; x.textAlign = 'right';
       [
-        'ההדמיה היא המחשה משוערת בלבד. היא אינה חוזה את תוצאת הטיפול',
-        'ואינה קובעת את סוג הטיפול או כמות החומר. התוצאה בפועל נקבעת בהתאם',
-        'לאנטומיה, לחומר, לטכניקת הטיפול ולבדיקה רפואית של ד״ר אמירה.'
+        'הדמיה חזותית משוערת בלבד. אינה חוזה את תוצאת הטיפול ואינה קובעת',
+        'את סוג הטיפול או כמות החומר. התוצאה בפועל נקבעת בהתאם לאנטומיה,',
+        'לחומר, לטכניקת הטיפול ולבדיקה רפואית של ד״ר אמירה.'
       ].forEach(function (l, i) { x.fillText(l, c.width - pad, y + 30 + i * 27); });
 
       c.toBlob(function (blob) {
-        window.__amiraSaveImage
-          ? window.__amiraSaveImage(blob, 'amira-ai-mirror-preview.jpg')
-          : (function () {
-              var a = document.createElement('a');
-              a.href = URL.createObjectURL(blob);
-              a.download = 'amira-ai-mirror-preview.jpg';
-              document.body.appendChild(a); a.click(); a.remove();
-              setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
-            })();
+        if (window.__amiraSaveImage) { window.__amiraSaveImage(blob, 'ameera-dabaja-simulation.jpg'); return; }
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'ameera-dabaja-simulation.jpg';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
       }, 'image/jpeg', 0.92);
     });
   }
@@ -1119,10 +1055,12 @@
   if (discuss) {
     discuss.addEventListener('click', function () {
       try {
+        var vol = S.active.filter(function (k) { var d = defOf(k); return d && d.op === 'volume'; })
+          .map(function (k) { return defOf(k).he + ' ' + (S.amounts[k] || 0.5).toFixed(1) + ' ml'; });
         sessionStorage.setItem('amira.mirror.handoff', JSON.stringify({
           keys: S.active,
           regions: S.active.map(function (k) { var d = defOf(k); return d ? d.he : k; }),
-          level: S.volumeMode ? S.volumeMl + ' ml (תרחיש)' : intensityLabel(S.intensity)
+          level: vol.length ? vol.join(', ') : LEVELS[S.level].he
         }));
       } catch (e) { /* private mode: the flow still works, just without prefill */ }
     });
@@ -1130,37 +1068,42 @@
 
   function reset() {
     stopCamera();
-    S.work = null; S.base = null; S.landmarks = null; S.frame = null;
-    S.regions = null; S.gate = null; S.active = []; S.consented = false;
-    S.intensity = 0.35; S.volumeMode = false; S.volumeMl = 1;
+    S.work = null; S.base = null; S.baseData = null;
+    S.landmarks = null; S.frame = null; S.regions = null; S.mesh = null;
+    S.gate = null; S.calib = null; S.lastAudit = null;
+    S.active = []; S.amounts = {}; S.consented = false;
+    S.product = NEUTRAL; S.level = 'natural';
     if (fileInput) fileInput.value = '';
-    if (intensityRange) intensityRange.value = 35;
-    var io = $('#intensityOut'); if (io) io.textContent = intensityLabel(0.35);
-    if (volumeRange) volumeRange.value = String(VOLUMES.indexOf(1));
-    var vo = $('#volumeOut'); if (vo) vo.textContent = '1 ml';
-    syncVolumeMode();
-    [octx, bctx, fctx].forEach(function (c) { if (c) c.clearRect(0, 0, 4000, 4000); });
-    if (vctx) vctx.clearRect(0, 0, 4000, 4000);
-    syncToggles();
+    var nat = $('input[name="previewLevel"][value="natural"]');
+    if (nat) nat.checked = true;
+    [octx, bctx, fctx, vctx].forEach(function (c) {
+      if (c) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, 4000, 4000); }
+    });
+    var strip = $('#compareStrip');
+    if (strip) { strip.innerHTML = ''; strip.hidden = true; }
+    syncControls();
     go('start');
   }
-  var resetBtn = $('#mirrorReset');
-  if (resetBtn) resetBtn.addEventListener('click', reset);
+  $$('.js-reset').forEach(function (b) { b.addEventListener('click', reset); });
 
-  /* Nothing is persisted; drop the pixels when the visitor leaves. */
   window.addEventListener('pagehide', function () {
     stopCamera();
-    S.work = null; S.base = null; S.landmarks = null;
-    [octx, bctx, fctx, vctx].forEach(function (c) { if (c) c.clearRect(0, 0, 4000, 4000); });
+    S.work = null; S.base = null; S.baseData = null; S.landmarks = null; S.mesh = null;
+    [octx, bctx, fctx, vctx].forEach(function (c) {
+      if (c) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, 4000, 4000); }
+    });
   });
 
   /* --------------------------------------------------------------- startup */
   if (DEBUG) studio.classList.add('is-debug');
+  if (CLINICIAN) studio.classList.add('is-clinician');
   buildRegionList();
-  syncToggles();
-  syncVolumeMode();
-  var io0 = $('#intensityOut');
-  if (io0) io0.textContent = intensityLabel(S.intensity);
+  buildProductStep();
+  syncControls();
 
-  window.AmiraMirror = { state: S, render: render, reset: reset, analyse: analyse, go: go };
+  window.AmiraMirror = {
+    state: S, render: render, reset: reset, analyse: analyse, go: go,
+    simulate: simulate, buildPlan: buildPlan, defOf: defOf,
+    products: { neutral: NEUTRAL, branded: BRANDED, ready: PRODUCTS_READY }
+  };
 })();

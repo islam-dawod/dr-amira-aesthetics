@@ -102,8 +102,9 @@ function buildScripts(imgMap) {
   const mirror = read('assets/js/mirror.js');
   const faceMesh = read('assets/js/face-mesh.js');
   const faceRegions = read('assets/js/face-regions.js');
+  const faceWarp = read('assets/js/face-warp.js');
 
-  return { data, site, faceMesh, faceRegions, mirror };
+  return { data, site, faceMesh, faceRegions, faceWarp, mirror };
 }
 
 /* The shim. Lives only in the bundle, never in the shipped site. */
@@ -149,7 +150,7 @@ function buildPages(imgMap) {
   const pages = {};
   for (const key of PAGE_LIST) {
     const raw = read(key);
-    const title = (raw.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || 'Dr. Amira Dabbagha';
+    const title = (raw.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || 'AMEERA DABAJA';
 
     let body = (raw.match(/<body[^>]*>([\s\S]*)<\/body>/) || [])[1];
     if (!body) throw new Error('no body in ' + key);
@@ -238,7 +239,7 @@ function assertAscii(text, label) {
   'use strict';
   var PAGES   = __PAGES__;
   var SCRIPTS = __SCRIPTS__;
-  var ORDER   = ['data', 'site', 'faceMesh', 'faceRegions', 'mirror'];
+  var ORDER   = ['data', 'site', 'faceMesh', 'faceRegions', 'faceWarp', 'mirror'];
 
   var root = document.documentElement;
   root.lang = 'he';
@@ -308,7 +309,7 @@ function assertAscii(text, label) {
   const styles = cssAscii(fontCss + '\n' + mainCss);
 
   const html =
-`<title>Dr. Amira Dabbagha</title>
+`<title>AMEERA DABAJA</title>
 
 <style>
 /* ===== embedded typefaces (Heebo + Cormorant Garamond, OFL) ==============

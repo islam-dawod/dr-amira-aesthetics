@@ -1,5 +1,5 @@
 /* ==========================================================================
-   face-mesh.js — face detection + quality gate for The Amira AI Mirror
+   face-mesh.js — face detection + quality gate for AI Visual Simulation
    --------------------------------------------------------------------------
    Wraps MediaPipe Face Landmarker (478 landmarks, Apache-2.0, vendored under
    assets/vendor/mediapipe/).

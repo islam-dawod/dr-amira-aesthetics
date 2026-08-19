@@ -20,3 +20,6 @@ __pycache__/
 
 # Generated single-file preview bundle
 _build/amira-site.bundle.html
+
+# Browser test helper, generated per session
+_testkit/

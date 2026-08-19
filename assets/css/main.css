@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Dr. Amira Dabbagha — Medical Aesthetics
+   AMEERA DABAJA — Medical Aesthetics
    Design language: Premium Skincare + Private Medical Clinic + Modern Tech
    Natural. Precise. Personal.
    ========================================================================== */
@@ -384,8 +384,14 @@ hr { border: 0; border-top: 1px solid var(--taupe-line); margin: var(--space-5) 
 }
 .brand__name {
   font-family: var(--font-en);
-  font-size: 1.3rem;
-  letter-spacing: .015em;
+  font-size: clamp(1.05rem, 2.4vw, 1.35rem);
+  font-weight: 300;
+  text-transform: uppercase;
+  /* open tracking is what makes a name read as a wordmark; it is reduced on
+     narrow screens so the logo never wraps or overflows the header */
+  letter-spacing: clamp(.10em, 1.4vw, .20em);
+  line-height: 1.05;
+  white-space: nowrap;
   color: var(--plum);
   direction: ltr;
 }
@@ -553,11 +559,12 @@ hr { border: 0; border-top: 1px solid var(--taupe-line); margin: var(--space-5) 
 .hero__title .en-name {
   display: block;
   font-family: var(--font-en);
-  font-size: .42em;
-  letter-spacing: .16em;
+  font-size: .40em;
+  font-weight: 300;
+  letter-spacing: .22em;
   text-transform: uppercase;
   color: var(--taupe-text);
-  margin-bottom: .7rem;
+  margin-bottom: .8rem;
   direction: ltr;
   unicode-bidi: isolate;
 }
@@ -1143,7 +1150,7 @@ textarea { min-height: 120px; resize: vertical; line-height: 1.6; }
 .flow__summary dd { margin: 0; font-weight: 500; text-align: end; }
 
 /* --------------------------------------------------------------------------
-   15. AI Studio (Amira AI Mirror)
+   15. AI Studio (AI Visual Simulation)
    -------------------------------------------------------------------------- */
 .studio {
   background: var(--white);
@@ -1497,9 +1504,12 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { border-color: var(--pl
 @media (min-width: 760px) { .footer-grid { grid-template-columns: 1.4fr 1fr 1fr; } }
 .footer-brand__name {
   font-family: var(--font-en);
-  font-size: 1.6rem;
+  font-size: clamp(1.3rem, 3.4vw, 1.7rem);
+  font-weight: 300;
+  text-transform: uppercase;
+  letter-spacing: .18em;
   color: #fff;
-  line-height: 1.2;
+  line-height: 1.15;
   direction: ltr;
 }
 .footer-brand__role {
@@ -1863,12 +1873,7 @@ body.has-bottom-nav { padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-i
   white-space: pre-wrap;
 }
 
-/* Volume is the secondary control; de-emphasise intensity while it is open so
-   the primary question stays "how subtle", not "how many ml". */
-#intensityControls.is-secondary { opacity: .55; }
-#intensityControls.is-secondary input[type="range"] { pointer-events: none; }
 
-#volumeToggle[aria-pressed="true"] { border-color: var(--plum); background: var(--sage); }
 
 .studio.is-debug .studio__head::after {
   content: "debugFace";
@@ -1878,6 +1883,145 @@ body.has-bottom-nav { padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-i
   text-transform: uppercase;
   color: var(--white);
   background: #B4453F;
+  padding: .2rem .5rem;
+  border-radius: var(--radius-pill);
+}
+
+/* --------------------------------------------------------------------------
+   22. AI Visual Simulation v3 — per-area amount, product, calibration,
+       quality readout, amount comparison
+   -------------------------------------------------------------------------- */
+
+/* Mobile first: the image gets the screen, the controls sit under it. */
+.mapper__stage { min-width: 0; }
+.mapper__controls { min-width: 0; }
+@media (max-width: 899px) {
+  .face-stage { max-height: 74svh; margin-inline: auto; }
+  .cam__stage { max-height: 74svh; margin-inline: auto; }
+}
+
+/* Per-area amount, revealed only for the areas actually selected */
+.amount {
+  margin: .5rem 0 .25rem;
+  padding: .7rem .9rem;
+  border: 1px solid var(--taupe-line);
+  border-inline-start: 3px solid var(--sage-deep);
+  border-radius: var(--radius-sm);
+  background: var(--ivory);
+}
+.amount > label {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: var(--fs-small);
+  font-weight: 500;
+  margin-bottom: .3rem;
+}
+.amount output {
+  font-family: var(--font-en);
+  color: var(--plum);
+  direction: ltr;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Face calibration, folded away by default */
+.calib {
+  border: 1px solid var(--taupe-line);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  padding: .7rem .9rem;
+}
+.calib > summary {
+  cursor: pointer;
+  font-size: var(--fs-small);
+  font-weight: 500;
+  color: var(--plum);
+}
+.calib__list, .quality, .applied-list {
+  list-style: none;
+  padding: 0;
+  margin: .6rem 0 0;
+  display: grid;
+  gap: .1rem;
+}
+.calib__list li, .quality li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .45rem 0;
+  border-bottom: 1px solid var(--taupe-line);
+  font-size: .875rem;
+  margin: 0;
+}
+.calib__list li:last-child, .quality li:last-child { border-bottom: 0; }
+.calib__list li span:last-child {
+  font-family: var(--font-en);
+  direction: ltr;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Quality grades read as state, not as a percentage that sounds clinical */
+.q {
+  font-family: var(--font-en);
+  font-size: var(--fs-micro);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: .16rem .5rem;
+  border-radius: var(--radius-pill);
+  direction: ltr;
+  white-space: nowrap;
+}
+.q--good { background: var(--sage);      color: #2F4A38; }
+.q--ok   { background: #EFE6D6;          color: #6A5326; }
+.q--low  { background: var(--rose);      color: #6E2F2C; }
+.q--na   { background: var(--taupe-line); color: var(--ink-muted); }
+
+/* Amount comparison strip */
+.compare-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: .6rem;
+  margin-top: .6rem;
+}
+.cmp-amt {
+  display: grid;
+  gap: .35rem;
+  padding: .35rem;
+  border: 1px solid var(--taupe-line);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+.cmp-amt:hover { border-color: var(--plum); transform: translateY(-2px); }
+.cmp-amt canvas {
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+  display: block;
+}
+.cmp-amt span {
+  font-family: var(--font-en);
+  font-size: var(--fs-micro);
+  letter-spacing: .06em;
+  color: var(--ink-muted);
+  direction: ltr;
+}
+/* An amount whose simulation failed its checks is shown as unavailable rather
+   than shown anyway. */
+.cmp-amt.is-rejected { opacity: .45; }
+.cmp-amt.is-rejected span::after { content: " · unavailable"; }
+
+/* Clinician planning mode, opened with ?clinician=1 */
+.studio.is-clinician .studio__head::after {
+  content: "clinician";
+  font-family: var(--font-en);
+  font-size: var(--fs-micro);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--white);
+  background: var(--plum);
   padding: .2rem .5rem;
   border-radius: var(--radius-pill);
 }

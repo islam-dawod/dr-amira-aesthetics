@@ -30,6 +30,18 @@ window.AmiraFaceRegions = (function () {
 
   var NOSE_TIP = 1;
 
+  /**
+   * Smooth odd ramp, replacing Math.sign() wherever a direction has to reverse
+   * across an anatomical midline. sign() is discontinuous: two adjacent
+   * vertices either side of the line receive opposite displacement, and the
+   * thin triangle between them folds. tanh reverses smoothly and is zero ON the
+   * line, which is also the anatomically correct behaviour — the wet line and
+   * the facial midline should not move.
+   */
+  function ramp(x, softness) {
+    return Math.tanh(x / (softness || 0.08));
+  }
+
   /* ----------------------------------------------------------------- helpers */
 
   function uniqueIndices(connections) {
@@ -330,23 +342,138 @@ window.AmiraFaceRegions = (function () {
        lift    — outward growth with an upward bias
        define  — directional shift along the local outward normal
        smooth  — no displacement at all; selective softening only          */
+  /* Region catalogue.
+
+     Each filler region declares:
+       mmPerMl    surface projection in millimetres per millilitre, at a neutral
+                  product profile. A SCENARIO scale, not a prediction: real
+                  projection depends on plane, technique, tissue and product.
+       transition width of the smooth decay, in interocular units. Deliberately
+                  wide — the transition has to be longer than the eye can
+                  resolve as an edge, which is the whole point of leaving masks
+                  behind.
+       vol(l,a)   anatomical distribution of the volume, 0..~1.4. This is what
+                  makes a cheek peak at the zygomatic arch instead of inflating
+                  like a ball, and a lip build at the tubercles rather than
+                  uniformly.
+       shape(l,a) tangential displacement, in units of the normal amplitude:
+                  the midface lift, the vermilion height, the jaw vector.
+
+     Botox regions carry `soften` instead: they are a texture change, not a
+     volume change, and are applied through the same smooth analytic field so
+     they have no boundary either. */
   var CATALOGUE = [
-    { key: 'lips',       en: 'Lips',              he: 'שפתיים',              kind: 'filler', volume: true,
-      op: 'expand', amp: 0.15, biasV: 1.35, feather: 0.55 },
-    { key: 'cheeks',     en: 'Cheeks',            he: 'לחיים',               kind: 'filler', volume: true,
-      op: 'lift',   amp: 0.11, lift: 0.34, feather: 0.9, pair: true },
-    { key: 'chin',       en: 'Chin',              he: 'סנטר',                kind: 'filler', volume: true,
-      op: 'expand', amp: 0.10, biasV: 1.25, feather: 0.8 },
-    { key: 'jawline',    en: 'Jawline',           he: 'קו לסת',              kind: 'filler',
-      op: 'define', amp: 0.045, feather: 0.7, pair: true },
-    { key: 'nasolabial', en: 'Nasolabial folds',  he: 'קמטים סביב הפה',      kind: 'filler',
-      op: 'smooth', amp: 0.85, feather: 0.5, pair: true },
-    { key: 'forehead',   en: 'Forehead',          he: 'קמטי מצח',            kind: 'botox',
-      op: 'smooth', amp: 1.0, feather: 0.9, clipBelowBrow: 0.06 },
-    { key: 'glabella',   en: 'Glabella',          he: 'קמטים בין הגבות',     kind: 'botox',
-      op: 'smooth', amp: 1.0, feather: 0.45 },
-    { key: 'crowsFeet',  en: "Crow's feet",       he: 'קמטים בצדי העיניים',  kind: 'botox',
-      op: 'smooth', amp: 0.95, feather: 0.5, pair: true }
+
+    /* ---------------------------------------------------------------- lips */
+    { key: 'lips', en: 'Lips', he: 'שפתיים', kind: 'filler', volume: true,
+      mmPerMl: 2.4, transition: 0.26, op: 'volume',
+      vol: function (l, a) {
+        var dv = l.v - a.vMouth;
+        var upper = dv < 0;
+        /* Upper and lower vermilion carry volume differently, and both peak
+           away from the wet line rather than on it. */
+        var band = 1 - Math.min(1, Math.abs(dv) / 0.22);
+        var base = (upper ? 0.82 : 1.0) * (0.45 + 0.55 * band);
+        /* central tubercles: on the lower lip, either side of centre */
+        var tub = Math.exp(-Math.pow((Math.abs(l.u) - 0.06) / 0.07, 2));
+        if (!upper) base += 0.30 * tub;
+        /* cupid's bow: the two upper peaks */
+        var bow = Math.exp(-Math.pow((Math.abs(l.u) - 0.09) / 0.06, 2));
+        if (upper) base += 0.26 * bow;
+        /* taper toward the commissures so the corners do not balloon */
+        var corner = 1 - Math.min(1, Math.pow(Math.abs(l.u) / 0.46, 3));
+        return base * (0.35 + 0.65 * corner);
+      },
+      shape: function (l, a) {
+        var dv = l.v - a.vMouth;
+        /* vermilion height: move away from the wet line, which increases show
+           without widening the mouth */
+        var fall = 1 - Math.min(1, Math.abs(dv) / 0.26);
+        /* ramp, not sign: the wet line itself stays put and the two vermilion
+           borders move apart from it */
+        var vert = ramp(dv, 0.055) * fall * 0.85;
+        var lat = ramp(l.u, 0.10) * Math.max(0, 1 - Math.abs(l.u) / 0.40) * 0.18;
+        return { u: lat, v: vert };
+      } },
+
+    /* -------------------------------------------------------------- cheeks */
+    { key: 'cheeks', en: 'Cheeks', he: 'לחיים', kind: 'filler', volume: true, pair: true,
+      mmPerMl: 1.9, transition: 0.52, op: 'volume',
+      vol: function (l, a) {
+        /* Peak on the zygomatic arch: high and lateral. Falls away toward the
+           anterior cheek and further toward the jaw, so the result reads as a
+           contour rather than a disc. */
+        var side = ramp(l.u, 0.14);
+        var du = (l.u - 0.62 * side) / 0.46;
+        var dv = (l.v - 0.42) / 0.40;
+        var arch = Math.exp(-(du * du + dv * dv));
+        /* anterior cheek: a lower, softer secondary lobe */
+        var du2 = (l.u - 0.34 * side) / 0.34;
+        var dv2 = (l.v - 0.74) / 0.34;
+        var ant = 0.45 * Math.exp(-(du2 * du2 + dv2 * dv2));
+        return Math.min(1.4, arch + ant);
+      },
+      shape: function (l, a) {
+        /* midface lift: up and slightly medial, which is how restored cheek
+           volume actually shifts the tissue above it */
+        var up = -0.55 * Math.max(0, 1 - Math.abs(l.v - 0.55) / 0.75);
+        return { u: -ramp(l.u, 0.14) * 0.10, v: up };
+      } },
+
+    /* ---------------------------------------------------------------- chin */
+    { key: 'chin', en: 'Chin', he: 'סנטר', kind: 'filler', volume: true,
+      mmPerMl: 2.1, transition: 0.34, op: 'volume',
+      vol: function (l, a) {
+        /* projection concentrated on the pogonion, tapering up toward the
+           labiomental fold and outward toward the jaw */
+        var dv = (l.v - (a.vChin - 0.18)) / 0.34;
+        var du = l.u / 0.40;
+        return Math.exp(-(du * du * 0.9 + dv * dv));
+      },
+      shape: function (l, a) {
+        /* vertical proportion: slight lengthening, strongest at the base */
+        return { u: 0, v: Math.max(0, 1 - Math.abs(l.u) / 0.5) * 0.45 };
+      } },
+
+    /* ------------------------------------------------------------- jawline */
+    { key: 'jawline', en: 'Jawline', he: 'קו לסת', kind: 'filler', volume: true, pair: true,
+      mmPerMl: 1.5, transition: 0.30, op: 'volume',
+      vol: function (l, a) {
+        /* a ribbon along the ramus and body of the mandible: nothing above the
+           mouth line, nothing below the jaw, so the neck stays put */
+        var along = Math.max(0, 1 - Math.abs(l.v - (a.vMouth + 0.42)) / 0.60);
+        var lateral = Math.min(1, Math.abs(l.u) / 0.55);
+        return along * (0.35 + 0.65 * lateral);
+      },
+      shape: function (l, a) {
+        /* along the outward jaw normal: out and slightly down, which sharpens
+           the contour instead of widening the whole lower face */
+        return { u: ramp(l.u, 0.16) * 0.75, v: 0.22 };
+      } },
+
+    /* ---------------------------------------------------------- nasolabial */
+    { key: 'nasolabial', en: 'Nasolabial folds', he: 'קמטים סביב הפה',
+      kind: 'filler', volume: true, pair: true,
+      mmPerMl: 1.2, transition: 0.28, op: 'volume', soften: 0.35,
+      vol: function (l, a) {
+        var dv = (l.v - (a.vNose + a.vMouth) / 2) / 0.34;
+        var du = (Math.abs(l.u) - 0.40) / 0.20;
+        return Math.exp(-(du * du + dv * dv));
+      },
+      shape: function (l, a) {
+        /* lift the fold rather than inflate it */
+        return { u: -ramp(l.u, 0.12) * 0.25, v: -0.45 };
+      } },
+
+    /* -------------------------------------------------- expression areas */
+    { key: 'forehead', en: 'Forehead', he: 'קמטי מצח', kind: 'botox',
+      op: 'soften', soften: 1.0, transition: 0.34, clipBelowBrow: 0.06 },
+
+    { key: 'glabella', en: 'Glabella', he: 'קמטים בין הגבות', kind: 'botox',
+      op: 'soften', soften: 1.0, transition: 0.20 },
+
+    { key: 'crowsFeet', en: "Crow's feet", he: 'קמטים בצדי העיניים', kind: 'botox',
+      op: 'soften', soften: 0.9, transition: 0.20, pair: true }
   ];
 
   /**
@@ -508,6 +635,7 @@ window.AmiraFaceRegions = (function () {
     build: build,
     CATALOGUE: CATALOGUE,
     NOSE_TIP: NOSE_TIP,
+    ramp: ramp,
     ringsFromConnections: ringsFromConnections,
     outerBoundary: outerBoundary,
     centroid: centroid

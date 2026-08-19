@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Dr. Amira Dabbagha — site behaviour
+   AMEERA DABAJA — site behaviour
    Quiet interactions only: fade, soft reveal, smooth compare sliders.
    Every module is optional — a page loads whatever markup it has.
    ========================================================================== */
