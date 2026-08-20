@@ -20,7 +20,7 @@ const PAGE_LIST = [
   'index.html', 'dr-amira.html', 'treatments.html',
   'treatments/botox.html', 'treatments/fillers.html', 'treatments/lips.html',
   'treatments/cheeks.html', 'treatments/chin.html', 'treatments/jawline.html',
-  'treatments/facial-balancing.html',
+  'treatments/materials.html', 'treatments/facial-balancing.html',
   'ai-studio.html', 'results.html', 'faq.html', 'articles.html',
   'contact.html', 'privacy.html', 'ai-privacy.html', 'accessibility.html', 'terms.html'
 ];
