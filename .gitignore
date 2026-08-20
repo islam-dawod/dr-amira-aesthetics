@@ -21,5 +21,6 @@ __pycache__/
 # Generated single-file preview bundle
 _build/amira-site.bundle.html
 
-# Browser test helper, generated per session
-_testkit/
+# Browser test tools. Tracked: these are maintained, not generated - the
+# synthetic-face fixture gives the assertions a ground truth to check against,
+# and the audit runner is how the site-wide regression is re-run.
