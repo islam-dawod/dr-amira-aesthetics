@@ -161,6 +161,16 @@
     turned:         'הפנים מופנות הצידה. נדרש מבט ישר למצלמה.',
     roll:           'הראש נטוי. כדאי ליישר את הראש.',
     too_small:      'הפנים קטנות מדי בתמונה. כדאי להתקרב.',
+    too_close:      'הפנים קרובות מדי לעדשה. כדאי להתרחק מעט מהמצלמה — ממרחק קצר '
+                  + 'העדשה מגדילה את האף ואת הלחי הקרובה, ואיננו יכולות להפריד '
+                  + 'בין העיוות הזה לבין מבנה הפנים עצמו.',
+    expression:     'יש הבעה פעילה בפנים — חיוך, כיווץ או פה פתוח. '
+                  + 'נדרשת הבעה רגועה וניטרלית, אחרת ההדמיה תציג את ההבעה '
+                  + 'ולא את השינוי.',
+    blurred:        'התמונה מטושטשת מדי באזור הפנים.',
+    exposure:       'חלק מהפנים שרוף או כבוי לגמרי בתמונה.',
+    too_dark:       'התמונה כהה מדי באזור הפנים.',
+    too_bright:     'התמונה בהירה מדי באזור הפנים.',
     cropped:        'הפנים חתוכות בקצה התמונה. נדרשות פנים שלמות, כולל סנטר ומצח.',
     no_frame:       'לא הצלחנו למפות את מבנה הפנים בצורה אמינה.',
     low_detail:     'התמונה ברזולוציה נמוכה מדי לאזור הפנים.',
@@ -218,6 +228,21 @@
 
     var frame = window.AmiraFaceRegions.buildFrame(gate.landmarks, S.sets, S.work.w / S.work.h);
     window.AmiraFaceMesh.assessFrame(frame, size, gate.problems, gate.metrics);
+    /* Sharpness and exposure, measured over the face only. Runs here rather
+       than in assess() because it needs the pixels, and assess() is also used
+       on the live camera frame where a per-frame Laplacian would be wasted
+       work. */
+    if (S.baseData && gate.landmarks) {
+      var fb = { x0: 1, y0: 1, x1: 0, y1: 0 };
+      gate.landmarks.forEach(function (p) {
+        if (p.x < fb.x0) fb.x0 = p.x;
+        if (p.y < fb.y0) fb.y0 = p.y;
+        if (p.x > fb.x1) fb.x1 = p.x;
+        if (p.y > fb.y1) fb.y1 = p.y;
+      });
+      window.AmiraFaceMesh.assessImage(S.baseData, S.work.w, S.work.h, fb,
+                                       gate.problems, gate.metrics);
+    }
     gate.ok = gate.problems.length === 0;
     if (!gate.ok) return gate;
 
@@ -1022,7 +1047,9 @@
     closer: 'להתקרב מעט', back: 'להתרחק מעט',
     left: 'למרכז את הפנים ←', right: 'למרכז את הפנים →',
     straight: 'להביט ישר למצלמה', level: 'ליישר את הראש',
-    centre: 'למרכז את הפנים במסגרת', ready: 'מושלם ✓'
+    centre: 'למרכז את הפנים במסגרת', ready: 'מושלם ✓',
+    relax: 'להרפות את הפנים, הבעה ניטרלית', light: 'נדרשת תאורה אחידה יותר',
+    steady: 'להחזיק את המצלמה יציבה'
   };
 
   function openCamera() {
@@ -1090,8 +1117,11 @@
       var by = {};
       gate.problems.forEach(function (p) { by[p.code] = p; });
 
-      if (by.cropped) hint = HINTS.back;
+      if (by.cropped || by.too_close) hint = HINTS.back;
       else if (by.too_small || by.low_detail) hint = HINTS.closer;
+      else if (by.exposure || by.too_dark || by.too_bright) hint = HINTS.light;
+      else if (by.blurred) hint = HINTS.steady;
+      else if (by.expression) hint = HINTS.relax;
       else if (by.roll) hint = HINTS.level;
       /* Rotation gets "look straight", never a left/right arrow: the preview is
          mirrored, so a rotation arrow is ambiguous. Arrows are for POSITION,

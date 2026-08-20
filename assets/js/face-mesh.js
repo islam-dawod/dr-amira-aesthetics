@@ -30,12 +30,72 @@ window.AmiraFaceMesh = (function () {
   /* Gate thresholds. Deliberately strict — see FAILING CLOSED above.
      Each is measured on a quantity whose meaning was verified, not assumed. */
   var GATE = {
-    maxOffAxisDeg:     20,    // the two unidentified matrix channels, bounded together
-    maxRollDeg:        14,    // in-plane, from the inter-eye axis angle
-    minFaceHeightFrac: 0.28,  // face bbox height / image height
-    minInterocularPx:  55,    // detail floor, in work-canvas pixels
-    edgeMargin:        0.015, // closer to the border than this counts as cropped
-    maxAsymmetry:      0.16   // left/right face half-width mismatch => turned
+    /* The reviewer asked for yaw within +-7 and pitch within +-7. We can
+       identify roll in the pose matrix but not which of the remaining two
+       channels is yaw and which is pitch, and guessing would produce
+       confidently wrong guidance. Bounding BOTH unidentified channels at 7
+       enforces the requirement either way: whichever one is yaw is within 7,
+       and so is whichever one is pitch. */
+    maxOffAxisDeg:      7,
+    maxRollDeg:         5,    // in-plane, from the inter-eye axis angle
+    minFaceHeightFrac:  0.28, // face bbox height / image height
+    /* At 0.92 this never fired: a face that tall has already reached the frame
+       edge and been caught as `cropped`, so the check was dead. Perspective
+       distortion matters well before that - a face filling three quarters of
+       the frame height on a phone is held close enough for the lens to enlarge
+       the nose and the near cheek. 0.28..0.78 still leaves a wide band of
+       ordinary portrait framing. */
+    maxFaceHeightFrac:  0.78,
+    minInterocularPx:   55,   // detail floor, in work-canvas pixels
+    edgeMargin:         0.015,// closer to the border than this counts as cropped
+    maxAsymmetry:       0.11, // left/right face half-width mismatch => turned
+    /* Image quality, measured over the face only - the background is not what
+       we are about to deform. */
+    minSharpness:       2.0,  // face contrast ratio, |Laplacian| / mean luma * 100
+    maxClippedFrac:     0.06, // share of face pixels blown out or crushed
+    minMeanLuma:        55,
+    maxMeanLuma:        215,
+  };
+
+  /**
+   * Expression limits, per blendshape rather than one number for all of them.
+   *
+   * A face mid-smile has different lip geometry from a relaxed one, so a
+   * preview built on it shows the smile as much as the treatment. But a single
+   * strict limit across every shape is the wrong instrument: some shapes score
+   * moderately on a genuinely relaxed face - fuller or slightly protruded lips
+   * read as `mouthPucker`, for instance - and refusing those would lock a real
+   * visitor out of the tool entirely. A false refusal costs her the feature; a
+   * moderate score she cannot feel costs a little accuracy in a preview that is
+   * already labelled an illustration.
+   *
+   * So the unambiguous shapes are held tightly and the ambiguous ones loosely.
+   * These numbers are deliberately on the permissive side and are the part of
+   * the gate most in need of validation against real photographs - the QA pass
+   * over a real image set has not been run, and until it has, being slow to
+   * refuse is the safer error.
+   *
+   * Scores run 0..1. Names are MediaPipe's own category names.
+   */
+  var EXPRESSION_LIMITS = {
+    /* unmistakable, and they move exactly the tissue we model */
+    jawOpen:          0.25,
+    cheekPuff:        0.25,
+    mouthSmileLeft:   0.32,
+    mouthSmileRight:  0.32,
+    /* real but easier to confuse with a resting face */
+    mouthFrownLeft:   0.40,
+    mouthFrownRight:  0.40,
+    mouthFunnel:      0.45,
+    mouthPressLeft:   0.45,
+    mouthPressRight:  0.45,
+    /* commonly non-zero at rest; only a strong reading means anything */
+    mouthPucker:      0.60,
+    browDownLeft:     0.45,
+    browDownRight:    0.45,
+    browInnerUp:      0.45,
+    eyeSquintLeft:    0.45,
+    eyeSquintRight:   0.45
   };
 
   /* ------------------------------------------------------------------ load */
@@ -78,7 +138,7 @@ window.AmiraFaceMesh = (function () {
           minFaceDetectionConfidence: 0.6,
           minFacePresenceConfidence: 0.6,
           minTrackingConfidence: 0.6,
-          outputFaceBlendshapes: false,
+          outputFaceBlendshapes: true,
           outputFacialTransformationMatrixes: true
         });
       })
@@ -117,7 +177,7 @@ window.AmiraFaceMesh = (function () {
           minFaceDetectionConfidence: 0.5,
           minFacePresenceConfidence: 0.5,
           minTrackingConfidence: 0.5,
-          outputFaceBlendshapes: false,
+          outputFaceBlendshapes: true,
           outputFacialTransformationMatrixes: true
         });
       })
@@ -151,6 +211,94 @@ window.AmiraFaceMesh = (function () {
       aboutY: Math.atan2(-m[2], Math.hypot(m[0], m[1])) * deg,         // yaw or pitch
       aboutX: Math.atan2(m[6], m[10]) * deg                            // the other one
     };
+  }
+
+  /**
+   * Reads the blendshape scores and reports the strongest expression found.
+   * Returns {peak, name} or null when the model did not supply blendshapes.
+   */
+  function expressionScore(result) {
+    var sets = (result && result.faceBlendshapes) || [];
+    if (!sets.length || !sets[0].categories) return null;
+    /* Ranked by how far each shape is OVER its own limit, so the shape we report
+       is the one actually breaking the gate and not merely the highest number.
+       A jaw at 0.30 against a limit of 0.25 matters; a pucker at 0.50 against a
+       limit of 0.60 does not. */
+    var worst = null, peak = 0, peakName = null;
+    sets[0].categories.forEach(function (c) {
+      var limit = EXPRESSION_LIMITS[c.categoryName];
+      if (limit == null) return;
+      if (c.score > peak) { peak = c.score; peakName = c.categoryName; }
+      var over = c.score - limit;
+      if (over > 0 && (!worst || over > worst.over)) {
+        worst = { name: c.categoryName, score: c.score, limit: limit, over: over };
+      }
+    });
+    return { peak: peak, name: peakName, exceeded: worst };
+  }
+
+  /**
+   * Image quality over the face region only: sharpness, exposure clipping and
+   * overall brightness. A blurred or blown-out face gives the landmarker less
+   * to work with and gives the deformation nothing to resample, so a preview
+   * built on one looks like a smudge rather than a result.
+   *
+   * `data` is RGBA from the work canvas; `box` is the face bounding box in
+   * normalised coordinates.
+   */
+  function assessImage(data, W, H, box, problems, metrics) {
+    if (!data || !box) return;
+    var x0 = Math.max(1, Math.floor(box.x0 * W));
+    var x1 = Math.min(W - 2, Math.ceil(box.x1 * W));
+    var y0 = Math.max(1, Math.floor(box.y0 * H));
+    var y1 = Math.min(H - 2, Math.ceil(box.y1 * H));
+    if (x1 <= x0 || y1 <= y0) return;
+
+    var n = 0, sumLuma = 0, clipped = 0, sumLap = 0;
+    for (var y = y0; y <= y1; y += 2) {
+      for (var x = x0; x <= x1; x += 2) {
+        var o = (y * W + x) * 4;
+        var l = 0.2126 * data[o] + 0.7152 * data[o + 1] + 0.0722 * data[o + 2];
+        n++; sumLuma += l;
+        if (l >= 250 || l <= 5) clipped++;
+        /* 4-neighbour Laplacian: a focus measure that does not need a
+           normalising assumption about content. */
+        var lu = 0.2126 * data[o - W * 4] + 0.7152 * data[o - W * 4 + 1] + 0.0722 * data[o - W * 4 + 2];
+        var ld = 0.2126 * data[o + W * 4] + 0.7152 * data[o + W * 4 + 1] + 0.0722 * data[o + W * 4 + 2];
+        var ll = 0.2126 * data[o - 4] + 0.7152 * data[o - 3] + 0.0722 * data[o - 2];
+        var lr = 0.2126 * data[o + 4] + 0.7152 * data[o + 5] + 0.0722 * data[o + 6];
+        sumLap += Math.abs(4 * l - lu - ld - ll - lr);
+      }
+    }
+    if (!n) return;
+
+    var meanLuma = sumLuma / n;
+    /* Relative, not absolute. An absolute Laplacian scales with brightness, so
+       a dark-but-perfectly-sharp photo measured as blurred and the visitor was
+       told to hold the camera steady when the real problem was the light.
+       Dividing by mean luminance makes this a contrast ratio, which is what
+       focus actually is: measured on the fixture, a sharp frame scores 5.5 at
+       luma 188 and 6.0 at luma 48, while a 4px blur scores 0.45. */
+    var sharp = (sumLap / n) / Math.max(1, meanLuma) * 100;
+    var clipFrac = clipped / n;
+    metrics.meanLuma = Math.round(meanLuma);
+    metrics.sharpness = +sharp.toFixed(2);
+    metrics.clippedFrac = +clipFrac.toFixed(3);
+
+    if (sharp < GATE.minSharpness) {
+      problems.push({ code: 'blurred',
+                      message: 'face detail measures ' + sharp.toFixed(1) + ', below ' + GATE.minSharpness });
+    }
+    if (clipFrac > GATE.maxClippedFrac) {
+      problems.push({ code: 'exposure',
+                      message: Math.round(clipFrac * 100) + '% of the face is blown out or crushed' });
+    }
+    if (meanLuma < GATE.minMeanLuma) {
+      problems.push({ code: 'too_dark', message: 'face brightness ' + Math.round(meanLuma) });
+    }
+    if (meanLuma > GATE.maxMeanLuma) {
+      problems.push({ code: 'too_bright', message: 'face brightness ' + Math.round(meanLuma) });
+    }
   }
 
   function bboxOf(points) {
@@ -212,6 +360,21 @@ window.AmiraFaceMesh = (function () {
       }
     }
 
+    /* --- expression ------------------------------------------------------ */
+    var expr = expressionScore(result);
+    if (expr) {
+      metrics.expression = +expr.peak.toFixed(3);
+      metrics.expressionShape = expr.name;
+      if (expr.exceeded) {
+        var x = expr.exceeded;
+        metrics.expressionExceeded = x.name + ' ' + x.score.toFixed(2) +
+                                    ' > ' + x.limit;
+        problems.push({ code: 'expression', shape: x.name,
+                        message: 'active expression (' + x.name + ' ' +
+                                 x.score.toFixed(2) + ', limit ' + x.limit + ')' });
+      }
+    }
+
     /* --- framing and scale ----------------------------------------------- */
     var box = bboxOf(pts);
     metrics.faceHeightFrac = +box.h.toFixed(3);
@@ -220,6 +383,16 @@ window.AmiraFaceMesh = (function () {
     if (box.h < GATE.minFaceHeightFrac) {
       problems.push({ code: 'too_small',
                       message: 'face fills only ' + Math.round(box.h * 100) + '% of the frame height' });
+    }
+    /* Too close is its own failure, not the opposite end of "too small". A face
+       held close to a phone lens is drawn in strong perspective: the nose and
+       the near cheek are magnified relative to the jaw. We do not try to undo
+       that - doing it properly needs the lens, and without it we would be
+       guessing which part of the shape is the person and which is the camera.
+       So we ask for a little more distance instead. */
+    if (box.h > GATE.maxFaceHeightFrac) {
+      problems.push({ code: 'too_close',
+                      message: 'face fills ' + Math.round(box.h * 100) + '% of the frame height' });
     }
 
     var m = GATE.edgeMargin;
@@ -300,10 +473,13 @@ window.AmiraFaceMesh = (function () {
     detectVideo: detectVideo,
     assess: assess,
     assessFrame: assessFrame,
+    assessImage: assessImage,
+    expressionScore: expressionScore,
     matrixAngles: matrixAngles,
     bboxOf: bboxOf,
     dispose: dispose,
     GATE: GATE,
+    EXPRESSION_LIMITS: EXPRESSION_LIMITS,
     get lib() { return lib; }
   };
 })();
