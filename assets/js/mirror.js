@@ -826,6 +826,113 @@
     if (hint) hint.hidden = S.active.length > 0;
   }
 
+  /* ==========================================================================
+     Clinician readout
+     --------------------------------------------------------------------------
+     `?clinician=1` used to add a badge and nothing else, which is worse than
+     not having the mode: a label that announces a capability it does not grant.
+     The engine now measures enough to be worth reading, so the mode shows the
+     numbers behind the picture.
+
+     None of it is a recommendation. It is what the engine did, in the units it
+     did it in, so that a clinician can see whether the preview is worth
+     discussing and where it stopped short.
+     ========================================================================== */
+  function paintClinician() {
+    var box = $('#clinicianReadout');
+    if (!box) return;
+    if (!CLINICIAN || !S.mesh) { box.hidden = true; return; }
+    box.hidden = false;
+
+    var IOD = window.AmiraFaceWarp.IOD_MM;
+    var plan = buildPlan({});
+    var m = (S.lastAudit && S.lastAudit.metrics) || {};
+    var sep = S.lastSeparation;
+    var p = S.proportions || {};
+
+    function row(k, v) {
+      return '<div class="cread__row"><span>' + k + '</span><span>' + v + '</span></div>';
+    }
+    var html = '';
+
+    /* ---- what was drawn, per region ---------------------------------- */
+    html += '<h4>Plan</h4>';
+    if (!plan.length) html += row('volume regions', 'none');
+    plan.forEach(function (it) {
+      var d = defOf(it.regionKey);
+      var bits = it.ml + ' ml &rarr; ' + it.mm.toFixed(2) + ' mm peak';
+      if (it.side !== 'both') bits += ' &middot; ' + it.side;
+      if (it.relChange != null) bits += ' &middot; ' + Math.round(it.relChange * 100) + '% of own height';
+      if (it.cappedAtMm != null) bits += ' &middot; CAPPED at ' + it.cappedAtMm + ' mm';
+      html += row((d ? d.en : it.regionKey), bits);
+    });
+    var soft = softenDefs();
+    if (soft.length) {
+      html += row('softening', soft.map(function (s) { return s.en || s.key; }).join(', '));
+    }
+
+    /* ---- separation, per region -------------------------------------- */
+    html += '<h4>Amount separation (1 ml vs 2 ml)</h4>';
+    if (!sep) html += row('not measured', '-');
+    else {
+      Object.keys(sep.perRegion).forEach(function (k) {
+        var r = sep.perRegion[k], d = defOf(k);
+        html += row((d ? d.en : k),
+          'fidelity ' + r.headline.fidelity + ' &middot; ' + r.headline.changedPx + ' px &middot; ' +
+          (r.headline.separated ? 'pass' : 'FAIL') +
+          ' &middot; resolves ' + (r.resolution ? r.resolution + ' ml' : 'nothing'));
+      });
+      html += row('threshold', 'fidelity &ge; ' + sep.thresholds.fidelity +
+                               ' and &ge; ' + sep.thresholds.pixels + ' px');
+    }
+
+    /* ---- her proportions -------------------------------------------- */
+    html += '<h4>Proportions (interocular units, 1.0 = ' + IOD + ' mm assumed)</h4>';
+    html += row('lower third of face height', p.lowerThirdShare == null ? '-' : p.lowerThirdShare);
+    html += row('vermilion height', p.lipHeight == null ? '-' :
+                p.lipHeight + ' (' + (p.lipHeight * IOD).toFixed(1) + ' mm)');
+    html += row('mouth width', p.mouthWidth == null ? '-' : p.mouthWidth);
+    html += row('vermilion / mouth width', p.lipFullness == null ? '-' : p.lipFullness);
+    html += row('chin height', p.chinHeight == null ? '-' : p.chinHeight);
+    html += row('face width / height', p.faceRatio == null ? '-' : p.faceRatio);
+    html += row('symmetry', p.symmetry == null ? '-' : p.symmetry);
+
+    /* ---- what the audit measured ------------------------------------ */
+    html += '<h4>Audit</h4>';
+    html += row('peak displacement', (m.maxShiftMm == null ? '-' : m.maxShiftMm + ' mm') +
+                                     (m.maxShiftPx == null ? '' : ' (' + m.maxShiftPx + ' px)'));
+    html += row('inverted triangles', m.flipped == null ? '-' : m.flipped);
+    html += row('change outside territory', m.outsidePct == null ? '-' : m.outsidePct + '%');
+    html += row('untreated regions disturbed',
+                Array.isArray(m.untreatedRegionsDisturbed)
+                  ? m.untreatedRegionsDisturbed.join('; ')
+                  : (m.untreatedRegionsDisturbed || '-'));
+    if (m.untreatedRegionsUnmeasurable) {
+      html += row('not measurable (territory overlap)', m.untreatedRegionsUnmeasurable.join(', '));
+    }
+    html += row('background samples changed', m.backgroundDiff || '-');
+    html += row('local texture', (m.textureBefore == null ? '-' :
+                m.textureBefore + ' &rarr; ' + m.textureAfter));
+    html += row('lighting fit', m.lightFit || '-');
+    html += row('pixels relit', m.shadedPx == null ? '-' : m.shadedPx);
+
+    /* ---- the gate --------------------------------------------------- */
+    var g = (S.gate && S.gate.metrics) || {};
+    html += '<h4>Image</h4>';
+    html += row('landmarks', g.landmarkCount == null ? '-' : g.landmarkCount);
+    html += row('interocular', g.interocularPx == null ? '-' : g.interocularPx + ' px');
+    html += row('roll / off-axis', (g.rollDeg == null ? '-' : g.rollDeg + '&deg;') + ' / ' +
+                                   (g.offAxisDeg == null ? '-' : g.offAxisDeg + '&deg;'));
+    html += row('face height of frame', g.faceHeightFrac == null ? '-' : g.faceHeightFrac);
+    html += row('sharpness / brightness', (g.sharpness == null ? '-' : g.sharpness) + ' / ' +
+                                          (g.meanLuma == null ? '-' : g.meanLuma));
+    html += row('clipped', g.clippedFrac == null ? '-' : Math.round(g.clippedFrac * 1000) / 10 + '%');
+    html += row('peak expression', g.expression == null ? '-' :
+                g.expression + ' (' + (g.expressionShape || '?') + ')');
+
+    box.innerHTML = html;
+  }
+
   function paintPlanSummary() {
     var list = $('#appliedList');
     if (!list) return;
@@ -1417,6 +1524,7 @@
       paintQuality();
       buildCompare();
       buildCompareMode();
+      paintClinician();
       var cmp = $('#resultCompare');
       if (cmp && window.AmiraSite) window.AmiraSite.bindCompare(cmp);
     }, 40);

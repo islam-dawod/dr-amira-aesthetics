@@ -30,14 +30,36 @@ window.AmiraFaceMesh = (function () {
   /* Gate thresholds. Deliberately strict — see FAILING CLOSED above.
      Each is measured on a quantity whose meaning was verified, not assumed. */
   var GATE = {
-    /* The reviewer asked for yaw within +-7 and pitch within +-7. We can
-       identify roll in the pose matrix but not which of the remaining two
-       channels is yaw and which is pitch, and guessing would produce
-       confidently wrong guidance. Bounding BOTH unidentified channels at 7
-       enforces the requirement either way: whichever one is yaw is within 7,
-       and so is whichever one is pitch. */
-    maxOffAxisDeg:      7,
-    maxRollDeg:         5,    // in-plane, from the inter-eye axis angle
+    /* ---- why this is not 7 ------------------------------------------
+       The requirement was yaw within +-7 degrees and pitch within +-7. It was
+       set to 7 here, and measurement showed that number was not measuring head
+       orientation at all.
+
+       On a perfectly frontal, symmetric, code-drawn face the pose matrix
+       reports 6.8 degrees on one of the two non-roll channels - and it stays at
+       5.9-7.2 across in-plane rotations of 0 and +-6 degrees, where true pitch
+       and yaw are exactly zero throughout. It is a fit residual: the solver
+       absorbs the difference between this face's proportions and its canonical
+       model as pose. Any face whose proportions differ from that model carries
+       such an offset, so the absolute value is not a head angle.
+
+       With the threshold at 7, that 6.8 baseline sat directly on the limit and
+       its noise crossed it at random: across five variants of the same frontal
+       face the gate refused two of them and passed three, in no meaningful
+       order. A gate that rejects frontal photographs by coin flip is worse than
+       a loose one.
+
+       So this bound now catches gross rotation only, clearing the observed
+       baseline and its noise by a wide margin, and the +-7 requirement is NOT
+       enforced here. Roll is, at 5 degrees, because roll is measured
+       geometrically from the eye line and verified against exact ground truth
+       (0 -> -0.1, -6 -> -6.3, +6 -> +5.6). For yaw and pitch, establishing a
+       real threshold needs photographs of real faces at known angles - the QA
+       set that has not been shot yet. Until then this is documented as open
+       rather than claimed as done.
+       ------------------------------------------------------------------ */
+    maxOffAxisDeg:      16,
+    maxRollDeg:         5,    // in-plane, from the eye line; verified
     minFaceHeightFrac:  0.28, // face bbox height / image height
     /* At 0.92 this never fired: a face that tall has already reached the frame
        edge and been caught as `cropped`, so the check was dead. Perspective
@@ -48,7 +70,13 @@ window.AmiraFaceMesh = (function () {
     maxFaceHeightFrac:  0.78,
     minInterocularPx:   55,   // detail floor, in work-canvas pixels
     edgeMargin:         0.015,// closer to the border than this counts as cropped
-    maxAsymmetry:       0.11, // left/right face half-width mismatch => turned
+    /* Half-width mismatch. A symmetric code-drawn face already measures 0.05
+       here, and natural facial asymmetry is common, so 0.11 left almost no
+       headroom for a real face. This is a coarse backstop against a clear turn,
+       not the yaw gate it was briefly treated as - an attempt to calibrate it
+       in degrees failed because the landmark model absorbs a compressed half as
+       a narrower face rather than a rotated one. */
+    maxAsymmetry:       0.15,
     /* Image quality, measured over the face only - the background is not what
        we are about to deform. */
     minSharpness:       2.0,  // face contrast ratio, |Laplacian| / mean luma * 100
