@@ -2121,3 +2121,14 @@ body.has-bottom-nav { padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-i
   background: #fff;
 }
 .compare-mode__row select:disabled { color: var(--ink-muted); }
+
+/* Stacked link lists inside a notice. Block targets with real padding, so
+   they clear the WCAG 2.2 24px minimum instead of sitting at the 21px a bare
+   <a> between <br> tags gives you. */
+.linklist { list-style: none; margin: .4rem 0 0; padding: 0; }
+.linklist li + li { border-top: 1px solid rgba(73, 58, 67, .10); }
+.linklist a {
+  display: block;
+  padding: .45rem 0;
+  min-height: 1.75rem;
+}
