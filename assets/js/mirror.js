@@ -215,6 +215,7 @@
 
   function analyse() {
     S.landmarks = null; S.frame = null; S.regions = null; S.mesh = null; S.calib = null;
+    S.proportions = null;
 
     var result;
     try { result = window.AmiraFaceMesh.detectImage(S.work.canvas); }
@@ -245,6 +246,11 @@
     }
     gate.ok = gate.problems.length === 0;
     if (!gate.ok) return gate;
+
+    /* Proportions, measured from her own landmarks. Reported in the
+       consultation summary and used for the change ceiling. */
+    S.proportions = window.AmiraFaceRegions.measureProportions(frame);
+    gate.metrics.proportions = S.proportions;
 
     var regions = window.AmiraFaceRegions.build(frame);
     /* Eyes, brows and the nose line are guarded: the deformation field is
@@ -312,11 +318,31 @@
       if (!def || def.op !== 'volume') return;
       var ml = opts.ml != null ? opts.ml : (S.amounts[key] != null ? S.amounts[key] : 0.5);
       var factor = R.doseFactor(ml, def.dose);
+      var mm = factor * (def.mmMax || 3);
+
+      /* Maximum Safe Visual Change. The same millilitre is a modest change on a
+         large face and a large one on a small face, so the ceiling is a share
+         of the region's OWN starting dimension, measured from this visitor's
+         landmarks. When it bites we record it, because rendering something
+         smaller than the amount she picked without saying so would be the
+         quiet kind of dishonesty this tool is supposed to avoid. */
+      var capMm = (S.proportions && S.frame)
+        ? R.maxSafeMm(key, S.proportions, S.frame, window.AmiraFaceWarp.IOD_MM)
+        : null;
+      var capped = false;
+      if (capMm != null && mm > capMm) { mm = capMm; capped = true; }
+
+      var rel = S.proportions
+        ? R.relativeChange(key, mm, S.proportions, window.AmiraFaceWarp.IOD_MM)
+        : null;
+
       plan.push({
         regionKey: key,
         ml: ml,
         factor: +factor.toFixed(4),
-        mm: factor * (def.mmMax || 3),
+        mm: mm,
+        cappedAtMm: capped ? +capMm.toFixed(2) : null,
+        relChange: rel == null ? null : +rel.toFixed(3),
         side: opts.side || S.sides[key] || 'both',
         profile: S.product.profile
       });
@@ -817,6 +843,25 @@
     var prod = '<li><span>מוצר</span><span>' +
       (S.product !== NEUTRAL ? S.product.brand + ' ' + S.product.name : 'פרופיל נייטרלי') + '</span></li>';
     list.innerHTML = (rows || '<li><span class="muted">לא נבחרו אזורים</span><span></span></li>') + prod;
+
+    /* If the change ceiling reduced what we drew, say so here. Showing less
+       than the amount she chose without a word would be the quiet kind of
+       dishonesty this tool exists to avoid. */
+    var note = $('#appliedCapNote');
+    if (note) {
+      var capped = buildPlan({}).filter(function (p) { return p.cappedAtMm != null; });
+      if (!capped.length) { note.hidden = true; note.textContent = ''; }
+      else {
+        note.hidden = false;
+        note.textContent = capped.map(function (p) {
+          var d = defOf(p.regionKey);
+          return 'ב' + (d ? d.he : p.regionKey) + ' הוצג שינוי קטן מהמבוקש: ' +
+                 'התכונה עצמה קטנה, ולכן אותה כמות היא שינוי גדול יותר ביחס אליה. ' +
+                 'ההדמיה מוגבלת ל־' + Math.round(window.AmiraFaceRegions.MAX_REL_CHANGE[p.regionKey] * 100) +
+                 '% מהמידה הקיימת, כדי שלא נציג שינוי שהתמונה אינה יכולה לתמוך בו.';
+        }).join(' ');
+      }
+    }
   }
 
   /* ---------------------------------------------------- simulation quality */
@@ -893,6 +938,127 @@
   /* =======================================================================
      Compare amounts
      ======================================================================= */
+  /* ==========================================================================
+     Compare mode
+     --------------------------------------------------------------------------
+     The slider started life as original-against-preview, which answers "what
+     would change" but not the question people actually sit on: "is 1 ml enough,
+     or do I want 1.5?". So either side of the slider can now be any amount, or
+     the untouched photograph.
+
+     Both sides are rendered through the same simulate() path as the main
+     preview, audits included. An amount whose simulation is refused is offered
+     as a disabled option rather than silently missing, because a gap with no
+     explanation reads as a bug.
+     ========================================================================== */
+
+  var CMP_ORIGINAL = 'original';
+
+  function compareOptions() {
+    var steps = (DOSE_STEPS || [0.5, 1.0, 1.5, 2.0]).slice();
+    return [CMP_ORIGINAL].concat(steps);
+  }
+
+  /* Renders one side of the comparison into a canvas context. Returns the audit
+     so the caller can tell a refusal from a success. */
+  function paintCompareSide(ctx, choice) {
+    if (choice === CMP_ORIGINAL) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, S.work.w, S.work.h);
+      ctx.drawImage(S.work.canvas, 0, 0);
+      return { ok: true, audit: null };
+    }
+    var r = simulate(ctx, { ml: parseFloat(choice) });
+    if (!r.ok) {
+      /* Never leave a failed simulation on screen. */
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, S.work.w, S.work.h);
+      ctx.drawImage(S.work.canvas, 0, 0);
+    }
+    return r;
+  }
+
+  function labelFor(choice) {
+    if (choice === CMP_ORIGINAL) return 'המקור';
+    var n = parseFloat(choice);
+    /* 1, 1.25, 1.5 - not 1.00 */
+    return (Math.round(n * 100) / 100) + ' מ״ל';
+  }
+
+  function buildCompareMode() {
+    var selA = $('#cmpSelA'), selB = $('#cmpSelB');
+    if (!selA || !selB || !S.mesh) return;
+
+    var hasVolume = S.active.some(function (k) {
+      var d = defOf(k); return d && d.op === 'volume';
+    });
+    var wrap = $('#compareMode');
+    if (wrap) wrap.hidden = !hasVolume;
+    if (!hasVolume) return;
+
+    /* Which amounts can actually be shown on this photograph. Probed once, on a
+       scratch canvas, so a disabled option is a measured fact. */
+    var W = S.work.w, H = S.work.h;
+    var scratch = document.createElement('canvas');
+    scratch.width = W; scratch.height = H;
+    var sctx = scratch.getContext('2d', { willReadFrequently: true });
+
+    var opts = compareOptions();
+    var refused = {};
+    opts.forEach(function (o) {
+      if (o === CMP_ORIGINAL) return;
+      refused[o] = !simulate(sctx, { ml: parseFloat(o) }).ok;
+    });
+
+    function fill(sel, chosen) {
+      sel.innerHTML = opts.map(function (o) {
+        var dis = refused[o] ? ' disabled' : '';
+        var extra = refused[o] ? ' — לא ניתן להציג' : '';
+        return '<option value="' + o + '"' + dis +
+               (String(o) === String(chosen) ? ' selected' : '') + '>' +
+               labelFor(o) + extra + '</option>';
+      }).join('');
+    }
+
+    /* Defaults preserve what the slider did before: the photograph against the
+       amount she has actually chosen. */
+    var current = null;
+    S.active.forEach(function (k) {
+      var d = defOf(k);
+      if (d && d.op === 'volume' && current == null) current = S.amounts[k];
+    });
+    if (current == null) current = 1.0;
+    var pick = opts.indexOf(current) > -1 ? current
+             : opts.filter(function (o) { return o !== CMP_ORIGINAL && !refused[o]; })[0];
+
+    if (!S.cmpA) S.cmpA = CMP_ORIGINAL;
+    if (!S.cmpB) S.cmpB = pick;
+    fill(selA, S.cmpA);
+    fill(selB, S.cmpB);
+
+    function repaint() {
+      S.cmpA = selA.value; S.cmpB = selB.value;
+      paintCompareSide(bctx, S.cmpA);
+      paintCompareSide(fctx, S.cmpB);
+      var ta = $('.compare__tag--a'), tb = $('.compare__tag--b');
+      if (ta) ta.textContent = labelFor(S.cmpA);
+      if (tb) tb.textContent = labelFor(S.cmpB);
+      var note = $('#cmpSameNote');
+      if (note) {
+        var same = String(S.cmpA) === String(S.cmpB);
+        note.hidden = !same;
+        if (same) note.textContent = 'שני הצדדים מציגים את אותו הדבר.';
+      }
+    }
+
+    if (!selA.dataset.bound) {
+      selA.addEventListener('change', repaint);
+      selB.addEventListener('change', repaint);
+      selA.dataset.bound = '1';
+    }
+    repaint();
+  }
+
   function buildCompare() {
     var strip = $('#compareStrip');
     if (!strip || !S.mesh) return;
@@ -1250,6 +1416,7 @@
       paintPlanSummary();
       paintQuality();
       buildCompare();
+      buildCompareMode();
       var cmp = $('#resultCompare');
       if (cmp && window.AmiraSite) window.AmiraSite.bindCompare(cmp);
     }, 40);
@@ -1334,9 +1501,10 @@
     stopCamera();
     S.work = null; S.base = null; S.baseData = null; S.lighting = undefined;
     S.landmarks = null; S.frame = null; S.regions = null; S.mesh = null;
-    S.gate = null; S.calib = null; S.lastAudit = null;
+    S.proportions = null; S.gate = null; S.calib = null; S.lastAudit = null;
     S.active = []; S.amounts = {}; S.sides = {}; S.consented = false;
     S.product = NEUTRAL; S.lastSeparation = null;
+    S.cmpA = null; S.cmpB = null;
     if (fileInput) fileInput.value = '';
     [octx, bctx, fctx, vctx].forEach(function (c) {
       if (c) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, 4000, 4000); }

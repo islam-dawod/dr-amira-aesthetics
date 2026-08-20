@@ -301,6 +301,129 @@ window.AmiraFaceRegions = (function () {
     };
   }
 
+  /* ==========================================================================
+     Face proportion analysis, and the ceiling it feeds
+     --------------------------------------------------------------------------
+     Everything here is measured on the visitor's own landmarks, in interocular
+     units, so it is a description of her face and not a comparison against
+     somebody's table of ideal ratios. The site does not tell anyone what her
+     proportions ought to be; that is the whole point of the project.
+
+     What the numbers are FOR is the ceiling. "2 ml" is a volume, not an
+     appearance: the same 2 ml is a modest change on a large face and a large
+     one on a small face, and on a mouth that is already full it is more still.
+     So each region declares how much it may change RELATIVE TO ITS OWN
+     starting dimension, and the plan is capped to that.
+
+     Grounding the bound in the visitor's own anatomy is deliberate. A bound
+     like "lip height should not exceed 25% of the lower third" would be an
+     aesthetic judgement invented here, and inventing one is exactly what this
+     project refuses to do. "We will not show you a change larger than 55% of
+     the lip height you already have" makes no claim about how lips ought to
+     look - it only limits how far a preview may travel from the photograph,
+     which is a statement about the tool's own honesty.
+
+     When a cap bites, the plan says so, and the interface tells the visitor
+     rather than quietly rendering something smaller than the amount she chose.
+     ========================================================================== */
+
+  /**
+   * Measures the proportions we can read reliably from 478 landmarks.
+   * All lengths are in interocular units (1.0 = the distance between the eyes),
+   * so the numbers are comparable between photographs of different sizes.
+   */
+  function measureProportions(frame) {
+    if (!frame) return null;
+    var a = frame.anchors;
+
+    var faceHeight = a.vChin - a.vTop;                  // brow-line to chin
+    /* widthAt returns the two crossings, not a width. */
+    var wSpan = frame.widthAt ? frame.widthAt(0.35) : null;
+    var faceWidth = wSpan ? wSpan.hi - wSpan.lo : null;
+    var lowerThird = a.vChin - a.vNose;                 // subnasale to chin
+    var lipHeight = a.vMouthBottom - a.vMouthTop;
+    var mouthWidth = a.uMouthR - a.uMouthL;
+    var chinHeight = a.vChin - a.vMouthBottom;
+
+    var out = {
+      faceHeight: round3(faceHeight),
+      faceWidth: faceWidth == null ? null : round3(faceWidth),
+      /* The classic thirds, reported because they are the vocabulary a
+         clinician already uses in a consultation - not because a particular
+         value is a target. */
+      lowerThirdShare: faceHeight > 0 ? round3(lowerThird / faceHeight) : null,
+      lipHeight: round3(lipHeight),
+      mouthWidth: round3(mouthWidth),
+      chinHeight: round3(chinHeight),
+      /* Vermilion height against mouth width: the ratio that decides whether a
+         given millimetre of lip projection reads as subtle or as obvious. */
+      lipFullness: mouthWidth > 0 ? round3(lipHeight / mouthWidth) : null,
+      faceRatio: (faceWidth && faceHeight > 0) ? round3(faceWidth / faceHeight) : null,
+      symmetry: frame.asymmetry == null ? null : round3(1 - frame.asymmetry)
+    };
+    return out;
+  }
+
+  function round3(v) { return v == null ? null : Math.round(v * 1000) / 1000; }
+
+  /**
+   * The dimension a region's change is measured against, in interocular units.
+   *
+   * This is deliberately short. A cap is only meaningful when the thing being
+   * capped and the thing it is measured against are the same kind of quantity,
+   * and what these regions gain is FORWARD PROJECTION - depth. A frontal
+   * photograph carries no depth reference: we can measure how tall a chin is
+   * but not how far it already projects, so "35% of the chin" would compare a
+   * depth against a height and mean nothing. An earlier version of this did
+   * exactly that for five regions, and the result was a ceiling that could
+   * never engage while looking like a safety limit.
+   *
+   * The lips are the exception. Vermilion height is what filler there visibly
+   * increases, and it is measurable from the front, so peak displacement and
+   * lip height are comparable and a share of one bounds the other.
+   *
+   * For every other region only the absolute per-region ceiling applies, and
+   * the interface says so rather than implying a personalised limit exists.
+   */
+  function regionScale(key, prop) {
+    if (!prop) return null;
+    return key === 'lips' ? prop.lipHeight : null;
+  }
+
+  /**
+   * Maximum Safe Visual Change: the share of its own starting dimension a
+   * region may move in the PREVIEW. Not a clinical recommendation and not a
+   * statement about how anyone's face ought to look - only a limit on how far
+   * the picture may travel from the photograph it was built from.
+   *
+   * 0.40 is chosen to sit above an ordinary result and engage on a face where
+   * the feature is unusually small: at 2 ml the lip model asks for 4.2 mm, so
+   * the cap binds once vermilion height falls below about 10.5 mm. That is the
+   * case it exists for - the same millilitre is a far larger change on a
+   * smaller feature.
+   */
+  var MAX_REL_CHANGE = { lips: 0.40 };
+
+  function maxSafeMm(key, prop, frame, iodMm) {
+    var rel = MAX_REL_CHANGE[key];
+    var scale = regionScale(key, prop);
+    if (rel == null || scale == null || !(scale > 0)) return null;
+    /* scale is in interocular units; one such unit is iodMm millimetres. */
+    return rel * scale * iodMm;
+  }
+
+  /**
+   * How large the planned change is against the region's own dimension, where
+   * one exists. Reported rather than judged: "this moves your lips by 31% of
+   * their current height" is a fact the consultation can use, and it needs no
+   * invented opinion about what the number should be.
+   */
+  function relativeChange(key, mm, prop, iodMm) {
+    var scale = regionScale(key, prop);
+    if (scale == null || !(scale > 0)) return null;
+    return mm / (scale * iodMm);
+  }
+
   /* ----------------------------------------------------------------- sets */
 
   /**
@@ -704,6 +827,10 @@ window.AmiraFaceRegions = (function () {
     DOSE_TABLE: DOSE_TABLE,
     DOSE_STEPS: DOSE_STEPS,
     doseFactor: doseFactor,
+    measureProportions: measureProportions,
+    maxSafeMm: maxSafeMm,
+    relativeChange: relativeChange,
+    MAX_REL_CHANGE: MAX_REL_CHANGE,
     NOSE_TIP: NOSE_TIP,
     ramp: ramp,
     ringsFromConnections: ringsFromConnections,

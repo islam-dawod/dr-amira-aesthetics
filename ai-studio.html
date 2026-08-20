@@ -358,6 +358,24 @@
                   </p>
 
                   <h3 class="mt-3" style="font-size:1.05rem">Compare amounts</h3>
+                  <div class="compare-mode" id="compareMode" hidden>
+                    <p class="tiny muted">
+                      אפשר להשוות בין שתי כמויות, לא רק בין המקור לתוצאה — כאן נשאלת
+                      בדרך כלל השאלה האמיתית: האם מ״ל אחד מספיק, או שרוצים אחד וחצי.
+                    </p>
+                    <div class="compare-mode__row">
+                      <label>
+                        <span>צד ימין</span>
+                        <select id="cmpSelA"></select>
+                      </label>
+                      <label>
+                        <span>צד שמאל</span>
+                        <select id="cmpSelB"></select>
+                      </label>
+                    </div>
+                    <p class="tiny muted" id="cmpSameNote" hidden></p>
+                  </div>
+
                   <div class="compare-strip" id="compareStrip" hidden></div>
                   <p class="micro">
                     Approximate visual simulation based on the selected amount and product.
@@ -367,6 +385,7 @@
                 <div>
                   <h3 style="font-size:1.05rem">מה מוצג בהדמיה</h3>
                   <ul class="applied-list" id="appliedList"></ul>
+                  <p class="tiny notice notice--rose" id="appliedCapNote" hidden></p>
 
                   <h3 class="mt-3" style="font-size:1.05rem">Simulation quality</h3>
                   <ul class="quality" id="qualityPanelResult"></ul>
@@ -582,10 +601,10 @@
 
 <a class="btn btn--primary book-bar" href="contact.html">קביעת ייעוץ</a>
 
-<script src="assets/js/site.js?v=5"></script>
-<script src="assets/js/face-mesh.js?v=5"></script>
-<script src="assets/js/face-regions.js?v=5"></script>
-<script src="assets/js/face-warp.js?v=5"></script>
-<script src="assets/js/mirror.js?v=5"></script>
+<script src="assets/js/site.js?v=10"></script>
+<script src="assets/js/face-mesh.js?v=10"></script>
+<script src="assets/js/face-regions.js?v=10"></script>
+<script src="assets/js/face-warp.js?v=10"></script>
+<script src="assets/js/mirror.js?v=10"></script>
 </body>
 </html>

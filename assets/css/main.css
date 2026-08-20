@@ -2087,3 +2087,37 @@ body.has-bottom-nav { padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-i
 }
 .dose__opt input:not(:checked):hover + span,
 .sides__opt input:not(:checked):hover + span { border-color: var(--taupe); }
+
+/* Compare mode: either side of the slider can be any amount ------------- */
+.compare-mode {
+  margin-top: 1rem;
+  padding: .85rem 1rem;
+  border: 1px solid var(--taupe-line);
+  border-radius: var(--radius);
+  background: var(--ivory);
+}
+.compare-mode__row {
+  display: flex;
+  gap: .75rem;
+  flex-wrap: wrap;
+  margin-top: .5rem;
+}
+.compare-mode__row label {
+  flex: 1 1 8rem;
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  font-size: .82rem;
+  color: var(--ink-muted);
+}
+.compare-mode__row select {
+  font: inherit;
+  font-size: .9rem;
+  color: var(--ink);
+  padding: .5rem .6rem;
+  min-height: 2.75rem;
+  border: 1px solid var(--taupe-line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+.compare-mode__row select:disabled { color: var(--ink-muted); }
