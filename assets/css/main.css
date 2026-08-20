@@ -2025,3 +2025,65 @@ body.has-bottom-nav { padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-i
   padding: .2rem .5rem;
   border-radius: var(--radius-pill);
 }
+
+/* --------------------------------------------------------------------------
+   23. Amount and side controls
+   Discrete dose steps replaced a continuous slider: each value is its own
+   point on a response curve, not a multiplier, so it should look like a
+   choice between defined amounts rather than a dimmer.
+   -------------------------------------------------------------------------- */
+.amount__label {
+  display: block;
+  font-size: var(--fs-small);
+  font-weight: 500;
+  margin-bottom: .45rem;
+}
+.amount__note { margin-top: .5rem; }
+
+.dose, .sides {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+}
+.sides { margin-top: .45rem; }
+
+.dose__opt, .sides__opt { position: relative; }
+.dose__opt input, .sides__opt input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.dose__opt span, .sides__opt span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 34px;
+  padding: .3rem .55rem;
+  border: 1px solid var(--taupe-line);
+  border-radius: var(--radius-pill);
+  background: var(--white);
+  font-family: var(--font-en);
+  font-size: .8125rem;
+  letter-spacing: .02em;
+  color: var(--ink);
+  direction: ltr;
+  font-variant-numeric: tabular-nums;
+  transition: all var(--t-fast) var(--ease);
+}
+.dose__opt input:checked + span,
+.sides__opt input:checked + span {
+  background: var(--plum);
+  border-color: var(--plum);
+  color: var(--white);
+}
+.dose__opt input:focus-visible + span,
+.sides__opt input:focus-visible + span {
+  outline: 2px solid var(--plum);
+  outline-offset: 2px;
+}
+.dose__opt input:not(:checked):hover + span,
+.sides__opt input:not(:checked):hover + span { border-color: var(--taupe); }

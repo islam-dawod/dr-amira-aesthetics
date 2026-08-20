@@ -33,15 +33,12 @@
   var DEBUG = /[?&]debugFace=1/.test(location.search);
   var CLINICIAN = /[?&]clinician=1/.test(location.search);
 
-  /* Amount range in millilitres — a visual scenario scale. The conversion to
-     surface projection lives in face-regions.js (mmPerMl). */
-  var ML_MIN = 0.1, ML_MAX = 2.0, ML_STEP = 0.1;
-
-  /* Two presentation levels. Not "before/after": both are simulations. */
-  var LEVELS = {
-    natural:  { label: 'Natural Preview',  he: 'עדין',  gain: 0.62 },
-    enhanced: { label: 'Enhanced Preview', he: 'מודגש', gain: 1.0 }
-  };
+  /* ONE control per area: the amount.
+     There used to be a presentation-level multiplier as well, which meant two
+     parameters scaled the same effect and the same preview could be reached two
+     ways. The amount now carries it alone, through a per-region dose-response
+     curve (face-regions.js), so a given millilitre value means one thing. */
+  var DOSE_STEPS = null;      // filled from the catalogue once it is loaded
 
   /* ------------------------------------------------------------- products
      The neutral profile is the only one shipped. The branded table is
@@ -60,8 +57,8 @@
     work: null, base: null, baseData: null,
     landmarks: null, frame: null, regions: null, mesh: null,
     sets: null, gate: null, calib: null,
-    active: [], amounts: {},
-    product: NEUTRAL, level: 'natural',
+    active: [], amounts: {}, sides: {},
+    product: NEUTRAL,
     consented: false, stream: null, rafId: 0, camReady: 0,
     lastAudit: null
   };
@@ -176,7 +173,9 @@
     identity_nose:  'ההדמיה הזיזה את אזור האף.',
     identity_brows: 'ההדמיה הזיזה את אזור הגבות.',
     background_changed: 'ההדמיה שינתה את הרקע.',
-    texture_lost:   'ההדמיה פגעה במרקם העור.'
+    texture_lost:   'ההדמיה פגעה במרקם העור.',
+    leaked_outside_region: 'ההדמיה השפיעה מחוץ לאזור שנבחר.',
+    disturbed_other_region: 'ההדמיה השפיעה על אזור אחר בפנים שלא נבחר.'
   };
 
   /**
@@ -271,17 +270,29 @@
     return null;
   }
 
+  /**
+   * Turns the chosen amounts into a plan.
+   *
+   * Amount -> millimetres of surface projection runs through a NON-LINEAR
+   * dose-response curve per region, not a multiplication of one generic
+   * effect. Tissue does not respond linearly, and a linear map is also what
+   * made consecutive amounts hard to tell apart.
+   */
   function buildPlan(opts) {
     opts = opts || {};
-    var gain = opts.gain != null ? opts.gain : LEVELS[S.level].gain;
+    var R = window.AmiraFaceRegions;
     var plan = [];
     S.active.forEach(function (key) {
       var def = defOf(key);
       if (!def || def.op !== 'volume') return;
       var ml = opts.ml != null ? opts.ml : (S.amounts[key] != null ? S.amounts[key] : 0.5);
+      var factor = R.doseFactor(ml, def.dose);
       plan.push({
-        regionKey: key, ml: ml,
-        mm: ml * (def.mmPerMl || 1) * gain,
+        regionKey: key,
+        ml: ml,
+        factor: +factor.toFixed(4),
+        mm: factor * (def.mmMax || 3),
+        side: opts.side || S.sides[key] || 'both',
         profile: S.product.profile
       });
     });
@@ -295,8 +306,9 @@
   /* =======================================================================
      Expression-area softening — analytic field, no mask
      ======================================================================= */
-  function applySoften(ctx, defs, gain) {
+  function applySoften(ctx, defs) {
     if (!defs.length) return;
+    var mesh0 = S.mesh;
     var W = S.work.w, H = S.work.h;
     var img = ctx.getImageData(0, 0, W, H);
     var out = img.data;
@@ -308,8 +320,9 @@
     defs.forEach(function (def) {
       var region = S.regions[def.key];
       if (!region) return;
-      var polys = region.parts.map(function (p) { return p.local; });
-      var pad = def.transition * iodPx * 1.2;
+      var coreF = def.coreFalloff || 0.18;
+      var edgeF = def.edgeFalloff || coreF;
+      var pad = (coreF + edgeF) * iodPx * 1.3;
       var x0 = W, y0 = H, x1 = 0, y1 = 0;
       region.parts.forEach(function (p) {
         p.image.forEach(function (q) {
@@ -320,17 +333,23 @@
       x0 = Math.max(0, Math.floor(x0 - pad)); x1 = Math.min(W - 1, Math.ceil(x1 + pad));
       y0 = Math.max(0, Math.floor(y0 - pad)); y1 = Math.min(H - 1, Math.ceil(y1 + pad));
 
-      var cutV = def.clipBelowBrow != null ? f.anchors.vBrow - def.clipBelowBrow : null;
       var rad = Math.max(1, Math.round(iodPx * 0.030));
       /* Capped: this is line softening, not skin smoothing. The texture audit
          rejects the result if detail collapses anyway. */
-      var maxBlend = 0.42 * (def.soften || 1) * gain;
+      var maxBlend = 0.42 * (def.soften || 1);
 
       for (var y = y0; y <= y1; y++) {
         for (var x = x0; x <= x1; x++) {
           var local = f.toLocal({ x: (x / W) * f.aspect, y: y / H });
-          if (cutV != null && local.v > cutV) continue;
-          var w = warp.regionWeight(local, polys, def.transition);
+          /* Same territory lock as the volume path, so softening cannot creep
+             onto the brows or the eyes either. */
+          var w = 0;
+          for (var pi = 0; pi < region.parts.length; pi++) {
+            var prt = region.parts[pi];
+            var wp = warp.regionWeight(local, [prt.local], coreF, prt.territory, edgeF);
+            if (wp > w) w = wp;
+          }
+          if (mesh0 && mesh0.protect) { /* protection is per-vertex, not per-pixel */ }
           if (w <= 0.004) continue;
           var alpha = maxBlend * w;
 
@@ -365,25 +384,200 @@
     var audit = { ok: true, problems: [], metrics: {} };
 
     if (plan.length) {
-      var dst = warp.deform(S.mesh, S.regions, plan);
+      var detail = {};
+      var dst = warp.deform(S.mesh, S.regions, plan, detail);
       audit = warp.audit(S.mesh, dst, S.regions, plan);
       if (!audit.ok) return { ok: false, audit: audit };
       warp.render(S.work.canvas, targetCtx, S.mesh, dst);
+
+      /* Volume that projects toward the camera cannot appear as pixel motion -
+         only 14-50% of the planned projection did. What makes it read as volume
+         is the light meeting the raised surface at a new angle, so we draw that
+         too: the shading function is fitted to THIS photograph, re-evaluated on
+         the deformed normals, and masked by the same weight field that moved
+         the mesh. If the photograph does not support the fit, we shade nothing
+         and say so rather than paint a highlight it contradicts. */
+      if (S.lighting === undefined) {
+        S.lighting = warp.estimateLighting(S.baseData, S.mesh, S.work.w, S.work.h);
+      }
+      audit.metrics.lightFit = S.lighting && S.lighting.ok
+        ? 'r2 ' + S.lighting.r2
+        : 'unavailable (' + ((S.lighting && S.lighting.reason) || 'none') + ')';
+      if (S.lighting && S.lighting.ok) {
+        var nDef = warp.normalsFrom(S.mesh, detail.camera);
+        var ratios = warp.shadeRatios(S.mesh, S.mesh.normals, nDef,
+                                      S.lighting, detail.weight);
+        audit.metrics.shadedPx = warp.applyShading(targetCtx, S.mesh, dst, ratios,
+                                                   S.work.w, S.work.h);
+      }
     } else {
       targetCtx.setTransform(1, 0, 0, 1, 0, 0);
       targetCtx.clearRect(0, 0, S.work.w, S.work.h);
       targetCtx.drawImage(S.work.canvas, 0, 0);
     }
 
-    if (softens.length) {
-      applySoften(targetCtx, softens, opts.gain != null ? opts.gain : LEVELS[S.level].gain);
-    }
+    if (softens.length) applySoften(targetCtx, softens);
 
     var outData = targetCtx.getImageData(0, 0, S.work.w, S.work.h).data;
     var px = warp.auditPixels(S.baseData, outData, S.mesh, S.work.w, S.work.h);
     if (!px.ok) { audit.ok = false; audit.problems = audit.problems.concat(px.problems); }
     Object.keys(px.metrics).forEach(function (k) { audit.metrics[k] = px.metrics[k]; });
+
+    /* Where did the change actually land? Runs for softening-only plans too. */
+    if (plan.length || softens.length) {
+      var softKeys = softens.map(function (d) { return d.key; });
+      var cont = warp.auditContainment(S.baseData, outData, S.mesh, S.regions, plan,
+                                       S.work.w, S.work.h, audit.metrics.maxShiftPx || 0,
+                                       softKeys);
+      if (!cont.ok) { audit.ok = false; audit.problems = audit.problems.concat(cont.problems); }
+      Object.keys(cont.metrics).forEach(function (k) { audit.metrics[k] = cont.metrics[k]; });
+    }
     return { ok: audit.ok, audit: audit };
+  }
+
+  /**
+   * Volume Difference Test — does the preview actually show the amount?
+   *
+   * The complaint that started this rebuild was that 1 ml and 2 ml looked too
+   * similar, so "the amounts differ" is not something this engine gets to
+   * assert. It has to be measured, per region, on the photograph in front of
+   * us, and the answer has to be allowed to be no.
+   *
+   * The measure is deliberately self-normalising. For a pair of amounts (a, b)
+   * the dose curve prescribes a difference of
+   *
+   *     expected = (f(b) - f(a)) / f(b)
+   *
+   * as a share of the whole effect at b. We render three frames - untreated, a,
+   * and b - and compute the same share from the pixels:
+   *
+   *     shown = energy(a, b) / energy(untreated, b)
+   *
+   * `fidelity = shown / expected` is then 1.0 when the picture reproduces
+   * exactly the difference the model asked for. Because both terms are measured
+   * on the same photograph, the result does not depend on how much texture or
+   * contrast that photograph happens to have - which an earlier absolute
+   * pixel-count threshold did, badly enough to report a working engine as
+   * broken on a flat test image.
+   *
+   * A pair passes when fidelity >= MIN_FIDELITY and the change covers at least
+   * MIN_PIXELS. MIN_FIDELITY is 0.5 because below it the preview is
+   * understating the visitor's choice of amount by more than half, which makes
+   * the ladder of amounts misleading rather than merely subtle.
+   *
+   * Returns per-pair numbers, and a refused simulation counts as a gap, never
+   * as a pass.
+   */
+  var MIN_FIDELITY = 0.5;
+  var MIN_PIXELS = 400;
+
+  function doseEnergy(a, b) {
+    if (!a || !b) return null;
+    var n = 0, sum = 0;
+    for (var i = 0; i < a.length; i += 4) {
+      var d = Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) +
+              Math.abs(a[i + 2] - b[i + 2]);
+      if (d > 9) { n++; sum += d; }     // above bilinear resampling noise
+    }
+    return { px: n, energy: sum };
+  }
+
+  /* One region at a time: composing several would let a big area's change hide
+     a small area's failure to move. */
+  function testRegionDoses(key, pairs) {
+    var W = S.work.w, H = S.work.h;
+    var scratch = document.createElement('canvas');
+    scratch.width = W; scratch.height = H;
+    var sctx = scratch.getContext('2d', { willReadFrequently: true });
+
+    var savedActive = S.active.slice();
+    var savedAmount = S.amounts[key];
+    var savedSide = S.sides[key];
+    S.active = [key];
+    S.sides[key] = 'both';
+
+    var cache = {};
+    function frameAt(ml) {
+      if (cache[ml] !== undefined) return cache[ml];
+      S.amounts[key] = ml;
+      var r = simulate(sctx, { ml: ml });
+      cache[ml] = r.ok ? sctx.getImageData(0, 0, W, H).data : null;
+      return cache[ml];
+    }
+
+    /* A dose of effectively zero, taken through the same code path, so the
+       reference frame carries the same resampling as the ones it is compared
+       against. */
+    var untreated = frameAt(0.0001);
+    var results = [];
+    pairs.forEach(function (p) {
+      var fa = frameAt(p[0]), fb = frameAt(p[1]);
+      if (!fa || !fb) {
+        results.push({ from: p[0], to: p[1], refused: true, separated: false });
+        return;
+      }
+      var pair = doseEnergy(fa, fb), full = doseEnergy(untreated, fb);
+      var expected = (doseFactorOf(p[1]) - doseFactorOf(p[0])) / (doseFactorOf(p[1]) || 1);
+      var shown = full && full.energy ? pair.energy / full.energy : 0;
+      var fidelity = expected > 0 ? shown / expected : 0;
+      results.push({
+        from: p[0], to: p[1],
+        changedPx: pair.px,
+        fidelity: +fidelity.toFixed(2),
+        separated: fidelity >= MIN_FIDELITY && pair.px >= MIN_PIXELS
+      });
+    });
+
+    S.active = savedActive;
+    S.amounts[key] = savedAmount;
+    S.sides[key] = savedSide;
+    return results;
+  }
+
+  function doseFactorOf(ml) {
+    return window.AmiraFaceRegions.doseFactor(ml);
+  }
+
+  /**
+   * Runs the test over every volume region on the loaded photograph.
+   *
+   * `headline` is the pair the reviewer named explicitly: 1 ml against 2 ml.
+   * If that pair fails for a region, the region's amounts are not honestly
+   * distinguishable on this photo and the caller is expected to act on it
+   * rather than show a ladder it cannot back.
+   *
+   * `resolution` reports the finest step that survives the same test, so the
+   * interface can say what it actually resolves instead of implying that every
+   * offered amount looks different from its neighbour.
+   */
+  function testDoseSeparation() {
+    if (!S.mesh || !S.regions) return null;
+    var perRegion = {}, failed = [], coarse = [];
+
+    Object.keys(S.regions).forEach(function (key) {
+      var def = S.regions[key].def;
+      if (!def.volume) return;                 // softening areas carry no amount
+      var res = testRegionDoses(key, [[1.0, 2.0], [0.5, 1.0], [1.0, 1.25]]);
+      var headline = res[0], halfStep = res[1], quarterStep = res[2];
+      var resolution = quarterStep.separated ? 0.25 : (halfStep.separated ? 0.5 : null);
+      perRegion[key] = { headline: headline, halfStep: halfStep,
+                         quarterStep: quarterStep, resolution: resolution };
+      if (!headline.separated) failed.push(key);
+      if (resolution === 0.5) coarse.push(key);
+      if (resolution === null) failed.push(key);
+    });
+
+    return {
+      ok: failed.length === 0,
+      failed: failed,
+      /* The honest headline for the interface: the finest amount difference the
+         preview reliably shows on THIS photograph. */
+      resolutionMl: Object.keys(perRegion).every(function (k) {
+                      return perRegion[k].resolution === 0.25; }) ? 0.25 : 0.5,
+      coarseRegions: coarse,
+      perRegion: perRegion,
+      thresholds: { fidelity: MIN_FIDELITY, pixels: MIN_PIXELS }
+    };
   }
 
   var renderTimer = null;
@@ -506,10 +700,28 @@
         '</button>' +
         (isVol
           ? '<div class="amount" data-amount-for="' + r.key + '" hidden>' +
-              '<label for="amt-' + r.key + '"><span>Amount</span>' +
-              '<output data-amount-out="' + r.key + '">0.5 ml</output></label>' +
-              '<input type="range" id="amt-' + r.key + '" data-amount-range="' + r.key +
-                '" min="' + ML_MIN + '" max="' + ML_MAX + '" step="' + ML_STEP + '" value="0.5">' +
+              '<span class="amount__label">Amount</span>' +
+              '<div class="dose" role="radiogroup" aria-label="Amount for ' + r.en + '">' +
+                (DOSE_STEPS || []).map(function (ml) {
+                  return '<label class="dose__opt">' +
+                    '<input type="radio" name="dose-' + r.key + '" value="' + ml + '"' +
+                      (ml === 0.5 ? ' checked' : '') + ' data-dose-for="' + r.key + '">' +
+                    '<span>' + ml.toFixed(2).replace(/0$/, '') + '</span></label>';
+                }).join('') +
+              '</div>' +
+              (r.sided
+                ? '<div class="sides" role="radiogroup" aria-label="Side for ' + r.en + '">' +
+                    ['both', 'left', 'right'].map(function (sd) {
+                      var lbl = sd === 'both' ? 'Both' : (sd === 'left' ? 'Left' : 'Right');
+                      return '<label class="sides__opt">' +
+                        '<input type="radio" name="side-' + r.key + '" value="' + sd + '"' +
+                          (sd === 'both' ? ' checked' : '') + ' data-side-for="' + r.key + '">' +
+                        '<span>' + lbl + '</span></label>';
+                    }).join('') +
+                  '</div>'
+                : '') +
+              '<p class="micro amount__note">ml · Approximate visual simulation based on the ' +
+                'selected amount and product.</p>' +
             '</div>'
           : '') +
         '</li>';
@@ -522,12 +734,15 @@
       b.addEventListener('focus', function () { hoverKey = b.dataset.region; paintOverlay(); });
       b.addEventListener('blur', function () { hoverKey = null; paintOverlay(); });
     });
-    $$('[data-amount-range]', regionList).forEach(function (r) {
-      r.addEventListener('input', function () {
-        var key = r.dataset.amountRange;
-        S.amounts[key] = parseFloat(r.value);
-        var out = $('[data-amount-out="' + key + '"]', regionList);
-        if (out) out.textContent = S.amounts[key].toFixed(1) + ' ml';
+    $$('[data-dose-for]', regionList).forEach(function (r) {
+      r.addEventListener('change', function () {
+        S.amounts[r.dataset.doseFor] = parseFloat(r.value);
+        scheduleRender();
+      });
+    });
+    $$('[data-side-for]', regionList).forEach(function (r) {
+      r.addEventListener('change', function () {
+        S.sides[r.dataset.sideFor] = r.value;
         scheduleRender();
       });
     });
@@ -566,15 +781,17 @@
     var rows = S.active.map(function (k) {
       var d = defOf(k);
       if (!d) return '';
-      var right = d.op === 'volume'
-        ? (S.amounts[k] || 0.5).toFixed(1) + ' ml'
-        : LEVELS[S.level].he;
-      return '<li><span>' + d.he + '</span><span>' + right + '</span></li>';
+      if (d.op !== 'volume') {
+        return '<li><span>' + d.he + '</span><span>ריכוך</span></li>';
+      }
+      var ml = (S.amounts[k] != null ? S.amounts[k] : 0.5);
+      var sd = S.sides[k] || 'both';
+      var sdTxt = sd === 'both' ? '' : (sd === 'left' ? ' · שמאל' : ' · ימין');
+      return '<li><span>' + d.he + '</span><span>' + ml + ' ml' + sdTxt + '</span></li>';
     }).join('');
-    var prod = S.product !== NEUTRAL
-      ? '<li><span>מוצר</span><span>' + S.product.brand + ' ' + S.product.name + '</span></li>' : '';
-    var lvl = '<li><span>רמת הצגה</span><span>' + LEVELS[S.level].label + '</span></li>';
-    list.innerHTML = (rows || '<li><span class="muted">לא נבחרו אזורים</span><span></span></li>') + prod + lvl;
+    var prod = '<li><span>מוצר</span><span>' +
+      (S.product !== NEUTRAL ? S.product.brand + ' ' + S.product.name : 'פרופיל נייטרלי') + '</span></li>';
+    list.innerHTML = (rows || '<li><span class="muted">לא נבחרו אזורים</span><span></span></li>') + prod;
   }
 
   /* ---------------------------------------------------- simulation quality */
@@ -597,6 +814,18 @@
       ['Facial symmetry', grade(c.symmetry, 0.93, 0.86)]
     ];
     var auditOk = !S.lastAudit || S.lastAudit.ok;
+    var sep = S.lastSeparation;
+    if (sep) {
+      /* Two separate facts, because they answer different questions. Whether
+         1 ml and 2 ml are distinguishable is pass/fail. How fine a difference
+         the preview resolves is a number, and stating it is more honest than
+         implying every offered amount looks different from its neighbour. */
+      rows.push(['Amount separation', sep.ok
+        ? { t: 'Distinct', c: 'good' } : { t: 'Too close', c: 'low' }]);
+      rows.push(['Preview resolves', sep.resolutionMl === 0.25
+        ? { t: '0.25 ml steps', c: 'good' }
+        : { t: '0.5 ml steps', c: 'ok' }]);
+    }
     var html = rows.map(function (r) {
       return '<li><span>' + r[0] + '</span><span class="q q--' + r[1].c + '">' + r[1].t + '</span></li>';
     }).join('') +
@@ -634,9 +863,7 @@
     });
   }
 
-  $$('input[name="previewLevel"]').forEach(function (r) {
-    r.addEventListener('change', function () { S.level = r.value; scheduleRender(); });
-  });
+
 
   /* =======================================================================
      Compare amounts
@@ -648,7 +875,7 @@
     if (!hasVolume) { strip.innerHTML = ''; strip.hidden = true; return; }
     strip.hidden = false;
 
-    var options = [0.5, 1.0, 1.5];
+    var options = [0.5, 1.0, 1.5, 2.0];
     strip.innerHTML = options.map(function (ml) {
       return '<button type="button" class="cmp-amt" data-ml="' + ml + '">' +
         '<canvas data-cmp="' + ml + '"></canvas><span>' + ml.toFixed(1) + ' ml</span></button>';
@@ -743,6 +970,7 @@
       if (faceStage) faceStage.style.aspectRatio = S.work.w + ' / ' + S.work.h;
       S.base = S.work.ctx.getImageData(0, 0, S.work.w, S.work.h);
       S.baseData = S.base.data;
+      S.lighting = undefined;      // refit the light for each new photograph
       return new Promise(function (res) { setTimeout(function () { res(analyse()); }, 30); });
     }).then(function (gate) {
       S.gate = gate;
@@ -987,6 +1215,8 @@
 
       bctx.putImageData(S.base, 0, 0);
       if (view) view.hidden = false;
+      /* Prove the amounts are actually distinguishable on THIS face. */
+      S.lastSeparation = testDoseSeparation();
       paintPlanSummary();
       paintQuality();
       buildCompare();
@@ -1056,11 +1286,15 @@
     discuss.addEventListener('click', function () {
       try {
         var vol = S.active.filter(function (k) { var d = defOf(k); return d && d.op === 'volume'; })
-          .map(function (k) { return defOf(k).he + ' ' + (S.amounts[k] || 0.5).toFixed(1) + ' ml'; });
+          .map(function (k) {
+            var sd = S.sides[k] || 'both';
+            return defOf(k).he + ' ' + (S.amounts[k] != null ? S.amounts[k] : 0.5) + ' ml' +
+              (sd === 'both' ? '' : (sd === 'left' ? ' (שמאל)' : ' (ימין)'));
+          });
         sessionStorage.setItem('amira.mirror.handoff', JSON.stringify({
           keys: S.active,
           regions: S.active.map(function (k) { var d = defOf(k); return d ? d.he : k; }),
-          level: vol.length ? vol.join(', ') : LEVELS[S.level].he
+          level: vol.length ? vol.join(', ') : 'ריכוך קמטים'
         }));
       } catch (e) { /* private mode: the flow still works, just without prefill */ }
     });
@@ -1068,14 +1302,12 @@
 
   function reset() {
     stopCamera();
-    S.work = null; S.base = null; S.baseData = null;
+    S.work = null; S.base = null; S.baseData = null; S.lighting = undefined;
     S.landmarks = null; S.frame = null; S.regions = null; S.mesh = null;
     S.gate = null; S.calib = null; S.lastAudit = null;
-    S.active = []; S.amounts = {}; S.consented = false;
-    S.product = NEUTRAL; S.level = 'natural';
+    S.active = []; S.amounts = {}; S.sides = {}; S.consented = false;
+    S.product = NEUTRAL; S.lastSeparation = null;
     if (fileInput) fileInput.value = '';
-    var nat = $('input[name="previewLevel"][value="natural"]');
-    if (nat) nat.checked = true;
     [octx, bctx, fctx, vctx].forEach(function (c) {
       if (c) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, 4000, 4000); }
     });
@@ -1088,7 +1320,8 @@
 
   window.addEventListener('pagehide', function () {
     stopCamera();
-    S.work = null; S.base = null; S.baseData = null; S.landmarks = null; S.mesh = null;
+    S.work = null; S.base = null; S.baseData = null; S.lighting = undefined;
+    S.landmarks = null; S.mesh = null;
     [octx, bctx, fctx, vctx].forEach(function (c) {
       if (c) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, 4000, 4000); }
     });
@@ -1097,6 +1330,7 @@
   /* --------------------------------------------------------------- startup */
   if (DEBUG) studio.classList.add('is-debug');
   if (CLINICIAN) studio.classList.add('is-clinician');
+  DOSE_STEPS = window.AmiraFaceRegions.DOSE_STEPS;
   buildRegionList();
   buildProductStep();
   syncControls();
@@ -1104,6 +1338,7 @@
   window.AmiraMirror = {
     state: S, render: render, reset: reset, analyse: analyse, go: go,
     simulate: simulate, buildPlan: buildPlan, defOf: defOf,
+    testDoseSeparation: testDoseSeparation,
     products: { neutral: NEUTRAL, branded: BRANDED, ready: PRODUCTS_READY }
   };
 })();

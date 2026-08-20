@@ -337,143 +337,204 @@ window.AmiraFaceRegions = (function () {
 
   /* --------------------------------------------------------------- regions */
 
-  /* Region catalogue. `op` selects the deformation family in mirror.js:
-       expand  — anisotropic outward growth about the region centroid
-       lift    — outward growth with an upward bias
-       define  — directional shift along the local outward normal
-       smooth  — no displacement at all; selective softening only          */
-  /* Region catalogue.
+  /* ==========================================================================
+     Region catalogue — territory-locked, dose-curved
+     --------------------------------------------------------------------------
+     Two things changed here after a reviewer saw volume leak toward the nose
+     and could not tell 1 ml from 2 ml.
 
-     Each filler region declares:
-       mmPerMl    surface projection in millimetres per millilitre, at a neutral
-                  product profile. A SCENARIO scale, not a prediction: real
-                  projection depends on plane, technique, tissue and product.
-       transition width of the smooth decay, in interocular units. Deliberately
-                  wide — the transition has to be longer than the eye can
-                  resolve as an edge, which is the whole point of leaving masks
-                  behind.
-       vol(l,a)   anatomical distribution of the volume, 0..~1.4. This is what
-                  makes a cheek peak at the zygomatic arch instead of inflating
-                  like a ball, and a lip build at the tubercles rather than
-                  uniformly.
-       shape(l,a) tangential displacement, in units of the normal amplitude:
-                  the midface lift, the vermilion height, the jaw vector.
+     1. TERRITORY LOCKING. Every region declares a `territory` box in face-local
+        units. The displacement field is ZERO on and outside that boundary, and
+        the falloff happens INSIDE it. That reconciles two requirements that
+        look contradictory: the region is hard-locked (nothing outside its
+        territory can move, so lips can never reach the nose) and yet there is
+        no visible edge (the field is already zero where the boundary is, so
+        there is no step to see). The old design put the falloff OUTSIDE the
+        region polygon, which is exactly how it reached neighbouring features.
 
-     Botox regions carry `soften` instead: they are a texture change, not a
-     volume change, and are applied through the same smooth analytic field so
-     they have no boundary either. */
+     2. DOSE RESPONSE. `dose` maps millilitres to a factor on a non-linear
+        curve, and `mmMax` is the surface projection in millimetres at factor
+        1.0. Tissue does not respond linearly, and — more practically — a
+        linear map made consecutive amounts visually indistinguishable. The
+        curve shape below follows the reviewer's specification; per-region
+        shapes should be tuned from clinical judgement, which is why `dose` is
+        overridable per region rather than hard-coded once.
+
+     `vol` still distributes the volume anatomically inside the territory, and
+     `shape` still supplies the tangential vector. Both are unchanged in kind.
+     ========================================================================== */
+
+  /* Shared dose-response curve. Interpolated over an explicit table rather
+     than a formula, so the numbers can be reviewed and argued with. */
+  var DOSE_TABLE = [
+    [0.00, 0.00],
+    [0.25, 0.20],
+    [0.50, 0.35],
+    [0.75, 0.48],
+    [1.00, 0.60],
+    [1.25, 0.70],
+    [1.50, 0.80],
+    [2.00, 1.00]
+  ];
+
+  function doseFactor(ml, table) {
+    var t = table || DOSE_TABLE;
+    if (ml <= t[0][0]) return t[0][1];
+    for (var i = 1; i < t.length; i++) {
+      if (ml <= t[i][0]) {
+        var a = t[i - 1], b = t[i];
+        var k = (ml - a[0]) / (b[0] - a[0] || 1);
+        return a[1] + (b[1] - a[1]) * k;
+      }
+    }
+    return t[t.length - 1][1];
+  }
+
+  /* The discrete amounts offered in the UI. Each one is a distinct point on
+     the curve, not a multiplier applied to one generic effect. */
+  var DOSE_STEPS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
   var CATALOGUE = [
 
     /* ---------------------------------------------------------------- lips */
     { key: 'lips', en: 'Lips', he: 'שפתיים', kind: 'filler', volume: true,
-      mmPerMl: 2.4, transition: 0.26, op: 'volume',
+      mmMax: 4.2, op: 'volume', coreFalloff: 0.16, edgeFalloff: 0.20,
+      /* Bounded below the nose and above the chin base: the perioral unit and
+         nothing else. */
+      territory: function (a) {
+        return { uMin: -0.70, uMax: 0.70,
+                 vMin: a.vNose + 0.26,
+                 vMax: Math.min(a.vChin - 0.18, a.vMouthBottom + 0.40) };
+      },
       vol: function (l, a) {
         var dv = l.v - a.vMouth;
         var upper = dv < 0;
-        /* Upper and lower vermilion carry volume differently, and both peak
-           away from the wet line rather than on it. */
         var band = 1 - Math.min(1, Math.abs(dv) / 0.22);
         var base = (upper ? 0.82 : 1.0) * (0.45 + 0.55 * band);
-        /* central tubercles: on the lower lip, either side of centre */
         var tub = Math.exp(-Math.pow((Math.abs(l.u) - 0.06) / 0.07, 2));
         if (!upper) base += 0.30 * tub;
-        /* cupid's bow: the two upper peaks */
         var bow = Math.exp(-Math.pow((Math.abs(l.u) - 0.09) / 0.06, 2));
         if (upper) base += 0.26 * bow;
-        /* taper toward the commissures so the corners do not balloon */
         var corner = 1 - Math.min(1, Math.pow(Math.abs(l.u) / 0.46, 3));
         return base * (0.35 + 0.65 * corner);
       },
       shape: function (l, a) {
         var dv = l.v - a.vMouth;
-        /* vermilion height: move away from the wet line, which increases show
-           without widening the mouth */
         var fall = 1 - Math.min(1, Math.abs(dv) / 0.26);
-        /* ramp, not sign: the wet line itself stays put and the two vermilion
-           borders move apart from it */
         var vert = ramp(dv, 0.055) * fall * 0.85;
         var lat = ramp(l.u, 0.10) * Math.max(0, 1 - Math.abs(l.u) / 0.40) * 0.18;
         return { u: lat, v: vert };
       } },
 
     /* -------------------------------------------------------------- cheeks */
-    { key: 'cheeks', en: 'Cheeks', he: 'לחיים', kind: 'filler', volume: true, pair: true,
-      mmPerMl: 1.9, transition: 0.52, op: 'volume',
+    { key: 'cheeks', en: 'Cheeks', he: 'לחיים', kind: 'filler', volume: true,
+      pair: true, sided: true,
+      mmMax: 3.4, op: 'volume', coreFalloff: 0.30, edgeFalloff: 0.34,
+      /* Lateral midface only: starts clear of the nose and stops above the
+         mouth line, so it cannot pull the perioral area or the nasal base. */
+      territory: function (a, sign) {
+        var lo = 0.26 * sign, hi = 1.45 * sign;
+        /* Starts well BELOW the eye line: the malar region does not extend up
+           to the orbit, and letting it do so put change on the eyelid. */
+        return { uMin: Math.min(lo, hi), uMax: Math.max(lo, hi),
+                 vMin: 0.20, vMax: a.vMouth - 0.02 };
+      },
       vol: function (l, a) {
-        /* Peak on the zygomatic arch: high and lateral. Falls away toward the
-           anterior cheek and further toward the jaw, so the result reads as a
-           contour rather than a disc. */
         var side = ramp(l.u, 0.14);
         var du = (l.u - 0.62 * side) / 0.46;
         var dv = (l.v - 0.42) / 0.40;
         var arch = Math.exp(-(du * du + dv * dv));
-        /* anterior cheek: a lower, softer secondary lobe */
         var du2 = (l.u - 0.34 * side) / 0.34;
         var dv2 = (l.v - 0.74) / 0.34;
         var ant = 0.45 * Math.exp(-(du2 * du2 + dv2 * dv2));
         return Math.min(1.4, arch + ant);
       },
       shape: function (l, a) {
-        /* midface lift: up and slightly medial, which is how restored cheek
-           volume actually shifts the tissue above it */
         var up = -0.55 * Math.max(0, 1 - Math.abs(l.v - 0.55) / 0.75);
         return { u: -ramp(l.u, 0.14) * 0.10, v: up };
       } },
 
     /* ---------------------------------------------------------------- chin */
     { key: 'chin', en: 'Chin', he: 'סנטר', kind: 'filler', volume: true,
-      mmPerMl: 2.1, transition: 0.34, op: 'volume',
+      mmMax: 3.8, op: 'volume', coreFalloff: 0.20, edgeFalloff: 0.24,
+      /* Mental region: below the lower lip, never up into the mouth. */
+      territory: function (a) {
+        /* The lower bound is generous on purpose: the chin vector points DOWN,
+           so the territory has to contain where the warp sends the pixels, not
+           just where the field is non-zero. */
+        return { uMin: -0.62, uMax: 0.62,
+                 vMin: a.vMouthBottom + 0.10,
+                 vMax: a.vChin + 0.16 };
+      },
       vol: function (l, a) {
-        /* projection concentrated on the pogonion, tapering up toward the
-           labiomental fold and outward toward the jaw */
         var dv = (l.v - (a.vChin - 0.18)) / 0.34;
         var du = l.u / 0.40;
         return Math.exp(-(du * du * 0.9 + dv * dv));
       },
       shape: function (l, a) {
-        /* vertical proportion: slight lengthening, strongest at the base */
         return { u: 0, v: Math.max(0, 1 - Math.abs(l.u) / 0.5) * 0.45 };
       } },
 
     /* ------------------------------------------------------------- jawline */
-    { key: 'jawline', en: 'Jawline', he: 'קו לסת', kind: 'filler', volume: true, pair: true,
-      mmPerMl: 1.5, transition: 0.30, op: 'volume',
+    { key: 'jawline', en: 'Jawline', he: 'קו לסת', kind: 'filler', volume: true,
+      pair: true, sided: true,
+      mmMax: 2.8, op: 'volume', coreFalloff: 0.18, edgeFalloff: 0.22,
+      /* Mandibular border only: lateral, below the mouth line, stopping at the
+         jaw so the neck and the midface stay out of it. */
+      territory: function (a, sign) {
+        var lo = 0.28 * sign, hi = 1.35 * sign;
+        return { uMin: Math.min(lo, hi), uMax: Math.max(lo, hi),
+                 vMin: a.vMouth + 0.04, vMax: a.vChin + 0.16 };
+      },
       vol: function (l, a) {
-        /* a ribbon along the ramus and body of the mandible: nothing above the
-           mouth line, nothing below the jaw, so the neck stays put */
         var along = Math.max(0, 1 - Math.abs(l.v - (a.vMouth + 0.42)) / 0.60);
         var lateral = Math.min(1, Math.abs(l.u) / 0.55);
         return along * (0.35 + 0.65 * lateral);
       },
       shape: function (l, a) {
-        /* along the outward jaw normal: out and slightly down, which sharpens
-           the contour instead of widening the whole lower face */
         return { u: ramp(l.u, 0.16) * 0.75, v: 0.22 };
       } },
 
     /* ---------------------------------------------------------- nasolabial */
     { key: 'nasolabial', en: 'Nasolabial folds', he: 'קמטים סביב הפה',
-      kind: 'filler', volume: true, pair: true,
-      mmPerMl: 1.2, transition: 0.28, op: 'volume', soften: 0.35,
+      kind: 'filler', volume: true, pair: true, sided: true,
+      mmMax: 2.0, op: 'volume', coreFalloff: 0.16, edgeFalloff: 0.18,
+      territory: function (a, sign) {
+        var lo = 0.16 * sign, hi = 0.78 * sign;
+        return { uMin: Math.min(lo, hi), uMax: Math.max(lo, hi),
+                 vMin: a.vNose - 0.16, vMax: a.vMouth + 0.22 };
+      },
       vol: function (l, a) {
         var dv = (l.v - (a.vNose + a.vMouth) / 2) / 0.34;
         var du = (Math.abs(l.u) - 0.40) / 0.20;
         return Math.exp(-(du * du + dv * dv));
       },
       shape: function (l, a) {
-        /* lift the fold rather than inflate it */
         return { u: -ramp(l.u, 0.12) * 0.25, v: -0.45 };
       } },
 
     /* -------------------------------------------------- expression areas */
     { key: 'forehead', en: 'Forehead', he: 'קמטי מצח', kind: 'botox',
-      op: 'soften', soften: 1.0, transition: 0.34, clipBelowBrow: 0.06 },
+      op: 'soften', soften: 1.0, coreFalloff: 0.22, edgeFalloff: 0.26,
+      territory: function (a) {
+        return { uMin: -1.20, uMax: 1.20, vMin: a.vTop - 0.20, vMax: a.vBrow - 0.06 };
+      } },
 
     { key: 'glabella', en: 'Glabella', he: 'קמטים בין הגבות', kind: 'botox',
-      op: 'soften', soften: 1.0, transition: 0.20 },
+      op: 'soften', soften: 1.0, coreFalloff: 0.14, edgeFalloff: 0.16,
+      territory: function (a) {
+        return { uMin: -0.40, uMax: 0.40, vMin: a.vBrow - 0.42, vMax: a.vBrow + 0.16 };
+      } },
 
     { key: 'crowsFeet', en: "Crow's feet", he: 'קמטים בצדי העיניים', kind: 'botox',
-      op: 'soften', soften: 0.9, transition: 0.20, pair: true }
+      op: 'soften', soften: 0.9, coreFalloff: 0.14, edgeFalloff: 0.16, pair: true,
+      /* Lateral to the orbit: never medial, so the eye itself is outside. */
+      territory: function (a, sign) {
+        var inner = (sign < 0 ? a.uEyeL : a.uEyeR);
+        var outer = 1.30 * sign;
+        return { uMin: Math.min(inner, outer), uMax: Math.max(inner, outer),
+                 vMin: -0.40, vMax: 0.50 };
+      } }
   ];
 
   /**
@@ -611,9 +672,15 @@ window.AmiraFaceRegions = (function () {
         cu /= poly.length; cv /= poly.length;
         /* Outward = away from the face centre line, in image space. */
         var sign = cu >= 0 ? 1 : -1;
+        /* Sign is decided from the part's own centroid, so a paired region
+           gets the correct mirrored territory without any left/right naming. */
+        var sideSign = cu >= 0 ? 1 : -1;
+        var terr = def.territory ? def.territory(frame.anchors, sideSign) : null;
         return {
           local: poly,
           image: image,
+          territory: terr,
+          sideSign: sideSign,
           /* absolute local-v line past which this part's mask is erased */
           clipBelowV: def.clipBelowBrow != null
             ? frame.anchors.vBrow - def.clipBelowBrow
@@ -634,6 +701,9 @@ window.AmiraFaceRegions = (function () {
     buildFrame: buildFrame,
     build: build,
     CATALOGUE: CATALOGUE,
+    DOSE_TABLE: DOSE_TABLE,
+    DOSE_STEPS: DOSE_STEPS,
+    doseFactor: doseFactor,
     NOSE_TIP: NOSE_TIP,
     ramp: ramp,
     ringsFromConnections: ringsFromConnections,
