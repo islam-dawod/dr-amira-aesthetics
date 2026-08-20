@@ -611,6 +611,11 @@ hr { border: 0; border-top: 1px solid var(--taupe-line); margin: var(--space-5) 
 }
 @media (max-width: 899px) { .hero__frame { aspect-ratio: 5 / 4; } }
 .hero__frame img { width: 100%; height: 100%; object-fit: cover; }
+/* A <picture> wrapper has to behave like the <img> it replaces. The reveal
+   animation transforms the frame's DIRECT child, and transforms do not apply
+   to an inline box - left inline, the photo would fade in without the scale
+   and would stay invisible entirely if the observer never fired. */
+.hero__frame picture { display: block; width: 100%; height: 100%; }
 
 .hero__blob {
   position: absolute;

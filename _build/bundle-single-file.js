@@ -66,12 +66,23 @@ async function buildFonts() {
 function buildImageMap() {
   const dir = path.join(ROOT, 'assets/img');
   const map = {};
+  /* Raster photographs count too. The bundle is a single file with a strict
+     CSP and no external requests, so a photo left as a relative path would
+     simply be a broken image in the preview. */
+  const MIME = { '.svg': 'image/svg+xml', '.jpg': 'image/jpeg',
+                 '.jpeg': 'image/jpeg', '.png': 'image/png',
+                 '.webp': 'image/webp' };
+  let bytes = 0;
   for (const f of fs.readdirSync(dir)) {
-    if (!f.endsWith('.svg')) continue;
-    const b64 = fs.readFileSync(path.join(dir, f)).toString('base64');
-    map['assets/img/' + f] = 'data:image/svg+xml;base64,' + b64;
+    const ext = path.extname(f).toLowerCase();
+    const mime = MIME[ext];
+    if (!mime) continue;
+    const raw = fs.readFileSync(path.join(dir, f));
+    bytes += raw.length;
+    map['assets/img/' + f] = 'data:' + mime + ';base64,' + raw.toString('base64');
   }
-  console.log(`images: inlined ${Object.keys(map).length} svg files`);
+  console.log(`images: inlined ${Object.keys(map).length} files, ` +
+              `${(bytes / 1024).toFixed(0)} KB raw`);
   return map;
 }
 
