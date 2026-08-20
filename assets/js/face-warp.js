@@ -499,12 +499,42 @@ window.AmiraFaceWarp = (function () {
       var def = region.def;
       var prof = item.profile || {};
       var mmProj = item.mm * (prof.projection || 1);
-      var coreF = (def.coreFalloff || 0.18) * (prof.spread || 1);
-      var edgeF = (def.edgeFalloff || coreF);
+      /* Tissue constraints. `overBone` sets how much of the load becomes
+         PROJECTION and how much becomes SPREAD; `laxity` sets how far the field
+         carries. Region-level anatomy, not a measurement of this face.
+
+         The split is imposed on the finished field rather than applied as a
+         gain, because a gain did not actually control it: each region's shape()
+         already returns a direction with its own magnitude, and those
+         magnitudes dominated - the lips came out with a HIGHER projection share
+         than the jawline, the opposite of what the constants say. Accumulating
+         the normal and tangential parts separately and then setting their ratio
+         leaves shape() responsible for direction, which is its job, and leaves
+         the tissue model responsible for the balance, which is its.
+
+         The ratio is imposed before smoothing, and smoothing then shifts it,
+         so the measured split lands below the figure set here rather than on
+         it. What holds is the separation: measured on the fixture, the regions
+         with little bony support come out at 0.23-0.38 projection and the
+         well-supported ones at 0.50-0.60. Bone support sets the balance; it
+         does not dictate an exact number, and this comment should not be read
+         as claiming it does. */
+      var tis = def.tissue || { overBone: 0.5, laxity: 0.5 };
+      var projShare = 0.28 + 0.50 * tis.overBone;
+      var coreF = (def.coreFalloff || 0.18) * (prof.spread || 1)
+                * (0.86 + 0.28 * tis.laxity);
+      var edgeF = (def.edgeFalloff || coreF) * (0.86 + 0.28 * tis.laxity);
 
       /* ---- this region's own field, in isolation ---------------------- */
       var offs = new Array(n);
-      for (var z = 0; z < n; z++) offs[z] = { x: 0, y: 0, z: 0 };
+      /* projection and spread accumulated apart, so their ratio can be set */
+      var offN = new Array(n), offT = new Array(n);
+      for (var z = 0; z < n; z++) {
+        offs[z] = { x: 0, y: 0, z: 0 };
+        offN[z] = { x: 0, y: 0, z: 0 };
+        offT[z] = { x: 0, y: 0, z: 0 };
+      }
+      var sumN = 0, sumT = 0;
       var touched = new Array(n);
       var boxes = [];
 
@@ -543,21 +573,37 @@ window.AmiraFaceWarp = (function () {
 
           /* 1. volume: along the surface normal. This is the part that reads as
                 projection rather than as a wider patch. */
-          offs[k].x += nrm.x * amp;
-          offs[k].y += nrm.y * amp;
-          offs[k].z += nrm.z * amp;
+          offN[k].x += nrm.x * amp;
+          offN[k].y += nrm.y * amp;
+          offN[k].z += nrm.z * amp;
+          sumN += Math.abs(amp);
 
-          /* 2. anatomical shaping, per region, in the face's own frame */
+          /* 2. anatomical shaping: shape() gives the DIRECTION the tissue
+                spreads, in the face's own frame. */
           var shape = def.shape ? def.shape(lp, mesh.frame.anchors, w, prof) : null;
           if (shape) {
             var t = amp * (def.shapeGain == null ? 1 : def.shapeGain);
-            offs[k].x += shape.u * t;
-            offs[k].y += shape.v * t;
+            offT[k].x += shape.u * t;
+            offT[k].y += shape.v * t;
+            sumT += Math.hypot(shape.u, shape.v) * Math.abs(t);
           }
           touched[k] = true;
           moved[k] = true;
         }
       });
+
+      /* Impose the tissue split: scale the two accumulated fields so their
+         summed magnitudes stand in the ratio the region's bone support implies.
+         The absolute scale here does not matter - calibration fixes the peak
+         further down - only the balance does. */
+      var kN = sumN > 1e-9 ? projShare / sumN : 0;
+      var kT = sumT > 1e-9 ? (1 - projShare) / sumT : 0;
+      for (var mx = 0; mx < n; mx++) {
+        if (!touched[mx]) continue;
+        offs[mx].x = offN[mx].x * kN + offT[mx].x * kT;
+        offs[mx].y = offN[mx].y * kN + offT[mx].y * kT;
+        offs[mx].z = offN[mx].z * kN + offT[mx].z * kT;
+      }
 
       /* Smoothing spreads offsets to immediate neighbours, so anything adjacent
          to a moved vertex must be reprojected too. */

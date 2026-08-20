@@ -517,11 +517,42 @@ window.AmiraFaceRegions = (function () {
      the curve, not a multiplier applied to one generic effect. */
   var DOSE_STEPS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
+  /* ==========================================================================
+     Tissue constraint model
+     --------------------------------------------------------------------------
+     Filler does not behave the same way everywhere, and the difference is
+     mostly about what is underneath it. Over bone, added volume has something
+     to push against and reads as projection. Over soft tissue with no bony
+     floor, the same volume spreads sideways instead - which is why a lip and a
+     chin do not respond alike to the same millilitre.
+
+     Two constants per region express that:
+
+       overBone  how well the site is supported from below. The chin sits on the
+                 mentum and the cheek over the zygomatic arch; the vermilion of
+                 the lip sits on nothing rigid at all.
+       laxity    how readily the surrounding tissue spreads under load, which
+                 sets how far the field carries beyond the injection site.
+
+     These are properties of the REGION, not of the visitor. Skin thickness,
+     elasticity and the distance from bone in a particular face cannot be
+     measured from a photograph, and this model does not pretend otherwise -
+     nothing here is personalised, and the page says so. What it does is stop
+     the engine from treating every site as the same material.
+
+     Because calibration fixes each field's peak afterwards, these constants
+     change the SHAPE of the deformation - how much becomes projection and how
+     far it carries - and not how large it is.
+     ========================================================================== */
+
   var CATALOGUE = [
 
     /* ---------------------------------------------------------------- lips */
     { key: 'lips', en: 'Lips', he: 'שפתיים', kind: 'filler', volume: true,
       mmMax: 4.2, op: 'volume', coreFalloff: 0.16, edgeFalloff: 0.20,
+      /* vermilion has no bony floor: volume here everts and spreads far more
+         readily than it projects */
+      tissue: { overBone: 0.15, laxity: 0.55 },
       /* Bounded below the nose and above the chin base: the perioral unit and
          nothing else. */
       territory: function (a) {
@@ -553,6 +584,8 @@ window.AmiraFaceRegions = (function () {
     { key: 'cheeks', en: 'Cheeks', he: 'לחיים', kind: 'filler', volume: true,
       pair: true, sided: true,
       mmMax: 3.4, op: 'volume', coreFalloff: 0.30, edgeFalloff: 0.34,
+      /* the zygomatic arch gives the midface a floor to project from */
+      tissue: { overBone: 0.75, laxity: 0.45 },
       /* Lateral midface only: starts clear of the nose and stops above the
          mouth line, so it cannot pull the perioral area or the nasal base. */
       territory: function (a, sign) {
@@ -580,6 +613,8 @@ window.AmiraFaceRegions = (function () {
     /* ---------------------------------------------------------------- chin */
     { key: 'chin', en: 'Chin', he: 'סנטר', kind: 'filler', volume: true,
       mmMax: 3.8, op: 'volume', coreFalloff: 0.20, edgeFalloff: 0.24,
+      /* directly on the mentum, and the tissue over it is tight */
+      tissue: { overBone: 0.85, laxity: 0.30 },
       /* Mental region: below the lower lip, never up into the mouth. */
       territory: function (a) {
         /* The lower bound is generous on purpose: the chin vector points DOWN,
@@ -602,6 +637,8 @@ window.AmiraFaceRegions = (function () {
     { key: 'jawline', en: 'Jawline', he: 'קו לסת', kind: 'filler', volume: true,
       pair: true, sided: true,
       mmMax: 2.8, op: 'volume', coreFalloff: 0.18, edgeFalloff: 0.22,
+      /* along the mandibular border: well supported, little room to spread */
+      tissue: { overBone: 0.80, laxity: 0.35 },
       /* Mandibular border only: lateral, below the mouth line, stopping at the
          jaw so the neck and the midface stay out of it. */
       territory: function (a, sign) {
@@ -622,6 +659,8 @@ window.AmiraFaceRegions = (function () {
     { key: 'nasolabial', en: 'Nasolabial folds', he: 'קמטים סביב הפה',
       kind: 'filler', volume: true, pair: true, sided: true,
       mmMax: 2.0, op: 'volume', coreFalloff: 0.16, edgeFalloff: 0.18,
+      /* a crease in mobile soft tissue; support from the maxilla is indirect */
+      tissue: { overBone: 0.25, laxity: 0.60 },
       territory: function (a, sign) {
         var lo = 0.16 * sign, hi = 0.78 * sign;
         return { uMin: Math.min(lo, hi), uMax: Math.max(lo, hi),
